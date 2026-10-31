@@ -17,7 +17,7 @@ import java.io.File
 import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicInteger
 
-data class DownloadProgress(val done: Int, val failed: Int, val total: Int, val cached: Int)
+data class DownloadProgress(val done: Int, val failed: Int, val total: Int, val cached: Int, val stage: String? = null)
 
 /**
  * Downloads chapters exactly like the app's BookDownloader2.downloadIndividualChapter
@@ -43,7 +43,7 @@ object Downloader {
             for (i in 0 until maxTries) {
                 ensureActive()
                 try {
-                    val page = Providers.loadHtml(api, data.url)
+                    val page = Providers.loadChapter(api, data.url)
                     if (!page.isNullOrBlank() && page.length > 40) {
                         f.parentFile.mkdirs()
                         val tmp = File(f.path + ".tmp")
@@ -69,6 +69,8 @@ object Downloader {
         api: MainAPI,
         chapters: List<Pair<Int, ChapterData>>,
         stripAuthorNotes: Boolean,
+        novelName: String? = null,
+        allChapters: List<ChapterData>? = null,
         onProgress: suspend (DownloadProgress) -> Unit,
     ): Pair<List<Chapter>, Int> = coroutineScope {
         val done = AtomicInteger(0)
@@ -78,6 +80,7 @@ object Downloader {
         var lastReport = 0L
         val reportLock = kotlinx.coroutines.sync.Mutex()
 
+        var stage: String? = null
         suspend fun report(force: Boolean = false) {
             val now = System.currentTimeMillis()
             if (!force && now - lastReport < 2500) return
@@ -85,7 +88,7 @@ object Downloader {
             try {
                 if (force || now - lastReport >= 2500) {
                     lastReport = now
-                    runCatching { onProgress(DownloadProgress(done.get(), failed.get(), chapters.size, cached)) }
+                    runCatching { onProgress(DownloadProgress(done.get(), failed.get(), chapters.size, cached, stage)) }
                 }
             } finally {
                 reportLock.unlock()
@@ -109,9 +112,12 @@ object Downloader {
             }
         }.awaitAll()
 
-        // pass 2: slow sequential retry of failed chapters
+        // pass 2: slow sequential retry of failed chapters (only when the site works at all -
+        // when every chapter failed the site is broken/blocked and retrying just wastes minutes)
         val retry = html.indices.filter { html[it] == null }
         if (retry.isNotEmpty() && retry.size < chapters.size) {
+            stage = "retrying ${retry.size} failed chapters slowly"
+            report(force = true)
             delay(4000)
             for ((n, i) in retry.withIndex()) {
                 ensureActive()
@@ -120,6 +126,36 @@ object Downloader {
                 report(force = n == retry.lastIndex)
                 delay(1200L + api.rateLimitTime)
             }
+        }
+
+        // pass 3: chapters that still fail are taken from another site that has the same novel
+        val missing = html.indices.filter { html[it] == null }
+        if (missing.isNotEmpty() && novelName != null) {
+            stage = "looking for ${missing.size} missing chapters on other sites"
+            report(force = true)
+            val total = allChapters?.size ?: 0
+            for (mirror in Mirrors.find(api, novelName, total)) {
+                ensureActive()
+                val todo = html.indices.filter { html[it] == null }
+                if (todo.isEmpty()) break
+                stage = "fetching ${todo.size} missing chapters from ${mirror.api.name}"
+                report(force = true)
+                val msem = Semaphore(if (mirror.api.hasRateLimit) 1 else Config.chapterParallelism)
+                var mirrorFails = 0
+                todo.map { i ->
+                    async {
+                        msem.withPermit {
+                            if (mirrorFails >= 5 && html.none { it != null }) return@withPermit
+                            val (index, data) = chapters[i]
+                            val target = Mirrors.match(mirror, index, data, total) ?: return@withPermit
+                            val page = chapterHtml(mirror.api, target, maxTries = 2)
+                            if (page != null) { html[i] = page; failed.decrementAndGet() } else mirrorFails++
+                            report()
+                        }
+                    }
+                }.awaitAll()
+            }
+            stage = null
         }
         report(force = true)
 

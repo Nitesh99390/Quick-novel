@@ -84,6 +84,7 @@ class Bot(private val tg: TelegramApi) {
         Logger.info("Logged in as @$botUsername — ${Providers.all.size} providers ready")
         tg.setCommands(
             listOf(
+                "menu" to "🏠 Main menu",
                 "search" to "🔍 Search a novel on all sites",
                 "browse" to "🧭 Browse popular novels of a site",
                 "library" to "⭐ Your saved novels",
@@ -200,6 +201,7 @@ class Bot(private val tg: TelegramApi) {
                 welcome(chatId, user)
             }
             "help" -> help(chatId)
+            "menu", "home" -> mainMenu(chatId, null)
             "search", "s" -> if (arg.isBlank()) tg.sendMessage(chatId, "🔍 Send me the novel name, e.g.\n<code>/search Shadow Slave</code>\n\nOr just type the name without a command.")
                 else search(chatId, userId, arg, msgId)
             "browse", "popular" -> browseMenu(chatId, null, 0)
@@ -252,13 +254,20 @@ I'm <b>QuickNovel Bot</b> — I search <b>${Providers.all.size} web-novel sites<
 Or paste a link from a supported site 🔗
 
 Current format: <b>${BookFormat.of(user.settings.format).label}</b> · change it in /settings""",
-            keyboard(
-                listOf(
-                    listOf(Btn("🧭 Browse popular", "b:0"), Btn("⚙️ Settings", "st:home")),
-                    listOf(Btn("🌐 Supported sites", "src"), Btn("❓ Help", "help")),
-                )
-            )
+            keyboard(menuRows())
         )
+    }
+
+    private fun menuRows(): List<List<Btn>> = listOf(
+        listOf(Btn("🧭 Browse popular", "b:0"), Btn("⚙️ Settings", "st:home")),
+        listOf(Btn("⭐ Library", "ls:L:0"), Btn("🕘 History", "ls:H:0")),
+        listOf(Btn("🌐 Supported sites", "src"), Btn("❓ Help", "help")),
+    )
+
+    /** Main menu: every screen has a 🏠 button that leads back here */
+    private suspend fun mainMenu(chatId: Long, messageId: Long?) {
+        val text = "🏠 <b>Main menu</b>\n\n🔍 Just type a novel name to search, or paste a link.\nOr pick an option:"
+        if (messageId == null || !tg.editMessage(chatId, messageId, text, keyboard(menuRows()))) tg.sendMessage(chatId, text, keyboard(menuRows()))
     }
 
     private suspend fun help(chatId: Long) {
@@ -268,6 +277,7 @@ Current format: <b>${BookFormat.of(user.settings.format).label}</b> · change it
 
 🔍 <b>Search</b> — just type a title, or <code>/search title</code>
 🔗 <b>Links</b> — paste a novel URL from any supported site
+🏠 /menu — main menu (every screen also has ⬅️ Back / 🏠 Menu buttons)
 🧭 /browse — popular / latest novels per site
 📖 <b>Read</b> — read chapters right inside Telegram
 📥 <b>Download</b> — all chapters, first/last 50/100 or a custom range like <code>20-150</code>
@@ -275,7 +285,8 @@ Current format: <b>${BookFormat.of(user.settings.format).label}</b> · change it
 ⚙️ /settings — default format, languages, enable/disable sites, author notes
 📥 /queue · ✖️ /cancel
 
-<i>Big novels are split into several volumes automatically so they fit Telegram's file limit. Chapters are cached, so re-downloads and updates are fast.</i>"""
+<i>Big novels are split into several volumes automatically so they fit Telegram's file limit. Chapters are cached, so re-downloads and updates are fast. When a site can't deliver some chapters, the bot fetches them from another site that has the same novel.</i>""",
+            keyboard(listOf(listOf(Btn("🏠 Menu", "home"))))
         )
     }
 
@@ -287,14 +298,15 @@ Current format: <b>${BookFormat.of(user.settings.format).label}</b> · change it
             sb.append(apis.joinToString(" · ") { "<a href=\"${h(it.mainUrl)}\">${h(it.name)}</a>" }).append('\n')
         }
         sb.append("\n<i>Enable/disable sites in /settings</i>")
-        tg.sendMessage(chatId, sb.toString())
+        tg.sendMessage(chatId, sb.toString(), keyboard(listOf(listOf(Btn("⚙️ Settings", "st:home"), Btn("🏠 Menu", "home")))))
     }
 
     // ------------------------------------------------------------------ search
 
     private fun searchApis(user: UserData): List<MainAPI> = Providers.all.filter { api ->
         api.name !in user.settings.disabledProviders &&
-                (user.settings.languages.isEmpty() || api.lang in user.settings.languages)
+                (user.settings.languages.isEmpty() || api.lang in user.settings.languages) &&
+                !Providers.isPaused(api) // sites that keep failing are skipped for a while
     }
 
     private suspend fun search(chatId: Long, userId: Long, query: String, replyTo: Long?) {
@@ -323,7 +335,8 @@ Current format: <b>${BookFormat.of(user.settings.format).label}</b> · change it
             val summary = "${ranked.size} results from $ok sites in ${Ui.duration(System.currentTimeMillis() - start)}" +
                     if (failed > 0) " · $failed sites failed" else ""
             if (ranked.isEmpty()) {
-                tg.editMessage(chatId, msg, "😕 Nothing found for <b>${h(q)}</b>.\n<i>$summary</i>\n\nTry a shorter or the original (English) title.")
+                tg.editMessage(chatId, msg, "😕 Nothing found for <b>${h(q)}</b>.\n<i>$summary</i>\n\nTry a shorter or the original (English) title.",
+                    keyboard(listOf(listOf(Btn("🧭 Browse instead", "b:0"), Btn("🏠 Menu", "home")))))
                 return
             }
             val s = newSession("🔍 ${q}", ranked, summary)
@@ -365,7 +378,9 @@ Current format: <b>${BookFormat.of(user.settings.format).label}</b> · change it
             if (s.browsePage > 1) more += Btn("⏮ Site page ${s.browsePage - 1}", "bp:$idx:${s.browsePage - 1}")
             more += Btn("Site page ${s.browsePage + 1} ⏭", "bp:$idx:${s.browsePage + 1}")
             rows += more
-            rows += listOf(Btn("🧭 Other sites", "b:0"))
+            rows += listOf(Btn("⬅️ Other sites", "b:0"), Btn("🏠 Menu", "home"))
+        } else {
+            rows += listOf(Btn("🏠 Menu", "home"))
         }
         val text = sb.toString()
         if (messageId == null || !tg.editMessage(chatId, messageId, text, keyboard(rows))) tg.sendMessage(chatId, text, keyboard(rows))
@@ -385,6 +400,7 @@ Current format: <b>${BookFormat.of(user.settings.format).label}</b> · change it
         nav += Btn("${p + 1}/$pages", "noop")
         if (p < pages - 1) nav += Btn("➡️", "b:${p + 1}")
         rows += nav
+        rows += listOf(Btn("🏠 Menu", "home"))
         val text = "🧭 <b>Browse</b>\nPick a site to see its popular / latest novels:"
         if (messageId == null || !tg.editMessage(chatId, messageId, text, keyboard(rows))) tg.sendMessage(chatId, text, keyboard(rows))
     }
@@ -392,17 +408,23 @@ Current format: <b>${BookFormat.of(user.settings.format).label}</b> · change it
     private suspend fun browseApi(chatId: Long, messageId: Long?, api: MainAPI, page: Int) {
         val mid = messageId ?: tg.sendMessage(chatId, "⏳ Loading <b>${h(api.name)}</b>…")
         if (messageId != null) tg.editMessage(chatId, mid, "⏳ Loading <b>${h(api.name)}</b> page $page…")
+        val idx = Providers.all.indexOf(api)
         val res = try {
-            Providers.rateLimited(api) {
-                api.loadMainPage(page, api.mainCategories.firstOrNull()?.second, api.orderBys.firstOrNull()?.second, api.tags.firstOrNull()?.second)
-            }
+            Providers.mainPage(api, page)
+        } catch (e: CancellationException) {
+            throw e
         } catch (t: Throwable) {
-            tg.editMessage(chatId, mid, "⚠️ ${h(api.name)} failed: <code>${h(Ui.cut(t.message ?: t.javaClass.simpleName, 200))}</code>",
-                keyboard(listOf(listOf(Btn("🔄 Retry", "bp:${Providers.all.indexOf(api)}:$page"), Btn("🧭 Other sites", "b:0")))))
+            Logger.warn("browse ${api.name} failed: ${t.message?.take(200)}")
+            tg.editMessage(chatId, mid, "⚠️ <b>${h(api.name)}</b> is not working right now.\n<i>${h(Providers.friendlyError(t))}</i>\n\nTry again later or pick another site.",
+                keyboard(listOf(
+                    listOf(Btn("🔄 Retry", "bp:$idx:$page"), Btn("⬅️ Other sites", "b:0")),
+                    listOf(Btn("🏠 Menu", "home")),
+                )))
             return
         }
         if (res.list.isEmpty()) {
-            tg.editMessage(chatId, mid, "😕 ${h(api.name)} returned nothing for page $page.", keyboard(listOf(listOf(Btn("🧭 Other sites", "b:0")))))
+            tg.editMessage(chatId, mid, "😕 ${h(api.name)} returned nothing for page $page.",
+                keyboard(listOf(listOf(Btn("⬅️ Other sites", "b:0"), Btn("🏠 Menu", "home")))))
             return
         }
         val label = listOfNotNull(api.mainCategories.firstOrNull()?.first, api.orderBys.firstOrNull()?.first).joinToString(" · ")
@@ -427,7 +449,7 @@ Current format: <b>${BookFormat.of(user.settings.format).label}</b> · change it
         return api to Providers.load(api, ref.url, allowCache)
     }
 
-    private fun novelKeyboard(ref: String, r: LoadResponse, user: UserData): Map<String, Any> {
+    private fun novelKeyboard(ref: String, r: LoadResponse, user: UserData, back: Btn? = null): Map<String, Any> {
         val rows = mutableListOf<List<Btn>>()
         if (r is StreamResponse && r.data.isNotEmpty()) {
             rows += listOf(Btn("📥 Download", "d:$ref"), Btn("📖 Read", "r:$ref:0:0"))
@@ -440,24 +462,28 @@ Current format: <b>${BookFormat.of(user.settings.format).label}</b> · change it
             Btn("🔄 Refresh", "rf:$ref"),
         )
         if (r.url.startsWith("http")) rows += listOf(Btn("🌐 Open on ${Ui.cut(r.apiName, 24)}", url = r.url))
+        rows += listOfNotNull(back, Btn("🏠 Menu", "home"))
         return keyboard(rows)
     }
 
-    private suspend fun openNovel(chatId: Long, ref: String, nref: NovelRef, userId: Long? = null, allowCache: Boolean = true) {
+    private suspend fun openNovel(chatId: Long, ref: String, nref: NovelRef, userId: Long? = null, allowCache: Boolean = true, back: Btn? = null) {
         tg.sendChatAction(chatId, "typing")
         val wait = tg.sendMessage(chatId, "⏳ Loading <b>${h(nref.title ?: nref.api)}</b>…")
         val (api, r) = try {
             loadRef(nref, allowCache)
         } catch (t: Throwable) {
             Logger.warn("load ${nref.url} failed: ${t.message}")
-            tg.editMessage(chatId, wait, "⚠️ Could not load this novel from <b>${h(nref.api)}</b>.\n<code>${h(Ui.cut(t.message ?: t.javaClass.simpleName, 300))}</code>",
-                keyboard(listOf(listOf(Btn("🔄 Try again", "rf:$ref")))))
+            tg.editMessage(chatId, wait, "⚠️ Could not load this novel from <b>${h(nref.api)}</b>.\n<i>${h(Providers.friendlyError(t))}</i>\n\nTry again, or search the title — the same novel is often on other sites too.",
+                keyboard(listOf(
+                    listOf(Btn("🔄 Try again", "rf:$ref"), Btn("🔍 Find on other sites", "alt:$ref")),
+                    listOfNotNull(back, Btn("🏠 Menu", "home")),
+                )))
             return
         }
         val realRef = Store.ref(api.name, nref.url, r.name)
         val user = Store.user(userId ?: chatId)
         Store.addHistory(user, realRef, r.name, api.name)
-        val markup = novelKeyboard(realRef, r, user)
+        val markup = novelKeyboard(realRef, r, user, back)
 
         if (user.settings.sendCover) {
             val cover = Downloader.cover(api, r.posterUrl, r.posterHeaders)?.let { BookBuilder.toJpeg(it, 1280, 4_000_000) }
@@ -492,6 +518,7 @@ Current format: <b>${BookFormat.of(user.settings.format).label}</b> · change it
         if (p + 10 < pages) nav += Btn("⏩", "cl:$ref:${p + 10}")
         rows += nav
         rows += listOf(Btn("📥 Download", "d:$ref"))
+        rows += listOf(Btn("⬅️ Back to novel", "n:$ref"), Btn("🏠 Menu", "home"))
         val text = "📑 <b>${h(r.name)}</b>\n${data.size} chapters · page ${p + 1}/$pages"
         if (messageId == null || !tg.editMessage(chatId, messageId, text, keyboard(rows))) tg.sendMessage(chatId, text, keyboard(rows))
     }
@@ -523,7 +550,8 @@ Current format: <b>${BookFormat.of(user.settings.format).label}</b> · change it
             val html = Downloader.chapterHtml(api, c)
             if (html == null) {
                 tg.editMessage(chatId, mid!!, "⚠️ Could not load <b>${h(c.name)}</b>.", keyboard(listOf(
-                    listOf(Btn("🔄 Retry", "r:$ref:$ch:0:1")), listOf(Btn("🌐 Open chapter", url = c.url)))))
+                    listOf(Btn("🔄 Retry", "r:$ref:$ch:0:1"), Btn("🌐 Open chapter", url = c.url)),
+                    listOf(Btn("📑 Chapters", "cl:$ref:${ch / 10}"), Btn("⬅️ Back to novel", "n:$ref")))))
                 return
             }
             val clean = ChapterCleaner.clean(c.name, html, Store.user(chatId).settings.stripAuthorNotes)
@@ -542,7 +570,8 @@ Current format: <b>${BookFormat.of(user.settings.format).label}</b> · change it
             p < pages.size - 1 -> nav += Btn("Part ${p + 2} ▶️", "r:$ref:$ch:${p + 1}:1")
             ch < data.size - 1 -> nav += Btn("Next ch. ⏭", "r:$ref:${ch + 1}:0:1")
         }
-        val rows = listOf(nav, listOf(Btn("📑 Chapters", "cl:$ref:${ch / 10}"), Btn("📥 Download", "d:$ref")))
+        val rows = listOf(nav, listOf(Btn("📑 Chapters", "cl:$ref:${ch / 10}"), Btn("📥 Download", "d:$ref")),
+            listOf(Btn("⬅️ Back to novel", "n:$ref"), Btn("🏠 Menu", "home")))
         if (mid == null || !tg.editMessage(chatId, mid!!, text, keyboard(rows))) tg.sendMessage(chatId, text, keyboard(rows))
 
         // prefetch next chapter quietly
@@ -570,6 +599,7 @@ Current format: <b>${BookFormat.of(user.settings.format).label}</b> · change it
             rows += listOf(Btn("First 100", "dg:$ref:$f:1:100"), Btn("Last 100", "dg:$ref:$f:${total - 99}:$total"))
         }
         rows += listOf(Btn("✏️ Custom range…", "dc:$ref:$f"))
+        rows += listOf(Btn("⬅️ Back to novel", "n:$ref"), Btn("📑 Chapters", "cl:$ref:0"))
         val limitNote = if (!isAdmin(userId) && Config.maxChapters in 1 until total) "\n⚠️ Max ${Config.maxChapters} chapters per download." else ""
         val text = "📥 <b>Download</b> — ${h(r.name)}\n$total chapters · format: <b>${fmt.label}</b>$limitNote\n\nChoose what to download:"
         if (messageId == null || !tg.editMessage(chatId, messageId, text, keyboard(rows))) tg.sendMessage(chatId, text, keyboard(rows))
@@ -632,8 +662,12 @@ Current format: <b>${BookFormat.of(user.settings.format).label}</b> · change it
                 tg.editMessage(chatId, job.messageId, "✖️ Download of <b>${h(job.title)}</b> cancelled.")
             } catch (t: Throwable) {
                 Logger.error("Download ${nref.url} failed", t)
-                tg.editMessage(chatId, job.messageId, "⚠️ Download failed: <code>${h(Ui.cut(t.message ?: t.javaClass.simpleName, 300))}</code>",
-                    keyboard(listOf(listOf(Btn("🔄 Try again", "dg:$ref:${format.name.take(1)}:$a:$b")))))
+                val reason = if (t is IllegalStateException) t.message.orEmpty() else Providers.friendlyError(t)
+                tg.editMessage(chatId, job.messageId, "⚠️ Download failed: <i>${h(Ui.cut(reason, 300))}</i>",
+                    keyboard(listOf(
+                        listOf(Btn("🔄 Try again", "dg:$ref:${format.name.take(1)}:$a:$b"), Btn("🔍 Other sites", "alt:$ref")),
+                        listOf(Btn("⬅️ Back to novel", "n:$ref"), Btn("🏠 Menu", "home")),
+                    )))
             } finally {
                 jobs.remove(job.id)
             }
@@ -658,7 +692,7 @@ Current format: <b>${BookFormat.of(user.settings.format).label}</b> · change it
         val user = Store.user(job.userId)
         val started = System.currentTimeMillis()
 
-        val (chapters, failed) = Downloader.download(api, selected, user.settings.stripAuthorNotes) { pr ->
+        val (chapters, failed) = Downloader.download(api, selected, user.settings.stripAuthorNotes, r.name, data) { pr ->
             val elapsed = System.currentTimeMillis() - started
             val fetched = pr.done - pr.cached.coerceAtMost(pr.done)
             val eta = if (fetched > 3 && pr.done < pr.total) " · ETA ${Ui.duration(elapsed * (pr.total - pr.done) / pr.done.coerceAtLeast(1))}" else ""
@@ -667,11 +701,12 @@ Current format: <b>${BookFormat.of(user.settings.format).label}</b> · change it
                 "📥 <b>${h(job.title)}</b>\n${Ui.bar(pr.done, pr.total)} ${pr.done * 100 / pr.total.coerceAtLeast(1)}%\n" +
                         "Chapters ${pr.done}/${pr.total}" + (if (pr.failed > 0) " · ⚠️ ${pr.failed} failed" else "") + eta +
                         (if (pr.cached > 0) "\n<i>${pr.cached} from cache</i>" else "") +
+                        (pr.stage?.let { "\n🔁 <i>${h(it)}…</i>" } ?: "") +
                         (if (api.hasRateLimit) "\n<i>${h(api.name)} is rate limited, please be patient</i>" else ""),
                 cancelKb
             )
         }
-        if (failed == selected.size) throw IllegalStateException("No chapter could be downloaded from ${api.name}")
+        if (failed == selected.size) throw IllegalStateException("No chapter could be downloaded from ${api.name} (and no other site with this novel worked). Try the same novel from another site.")
 
         tg.editMessage(chatId, job.messageId, "📦 <b>${h(job.title)}</b>\nBuilding ${format.label}…")
         tg.sendChatAction(chatId, "upload_document")
@@ -706,10 +741,14 @@ Current format: <b>${BookFormat.of(user.settings.format).label}</b> · change it
         }
         val took = Ui.duration(System.currentTimeMillis() - started)
         user.downloads++; Store.stats.downloads++; Store.stats.chapters += selected.size; Store.markDirty()
+        val doneRows = mutableListOf<List<Btn>>()
+        if (failed > 0) doneRows += listOf(Btn("🔄 Retry failed", "dg:${Store.ref(api.name, nref.url)}:${format.name.take(1)}:$a:$b"), Btn("🔍 Other sites", "alt:${Store.ref(api.name, nref.url)}"))
+        doneRows += listOf(Btn("⬅️ Back to novel", "n:${Store.ref(api.name, nref.url)}"), Btn("🏠 Menu", "home"))
         tg.editMessage(
             chatId, job.messageId,
             "✅ <b>${h(job.title)}</b>\n${selected.size - failed}/${selected.size} chapters · ${files.size} file(s) · $took" +
-                    (if (failed > 0) "\n⚠️ $failed chapters failed (placeholders inserted). Try again later — successful chapters are cached." else "")
+                    (if (failed > 0) "\n⚠️ $failed chapters failed (placeholders inserted). Retry later — successful chapters are cached, so only the missing ones are fetched." else ""),
+            keyboard(doneRows)
         )
     }
 
@@ -747,7 +786,7 @@ Current format: <b>${BookFormat.of(user.settings.format).label}</b> · change it
     private suspend fun queue(chatId: Long, userId: Long) {
         val all = jobs.values.sortedBy { it.id }
         val mine = all.filter { it.userId == userId }
-        if (mine.isEmpty()) { tg.sendMessage(chatId, "📭 No downloads running. Global queue: ${all.size}."); return }
+        if (mine.isEmpty()) { tg.sendMessage(chatId, "📭 No downloads running. Global queue: ${all.size}.", keyboard(listOf(listOf(Btn("🏠 Menu", "home"))))); return }
         val text = "📥 <b>Your downloads</b>\n" + mine.joinToString("\n") { j ->
             "• ${h(j.title)} — " + (if (j.started) "downloading" else "waiting (#${all.filter { !it.started }.indexOf(j) + 1})")
         }
@@ -761,19 +800,21 @@ Current format: <b>${BookFormat.of(user.settings.format).label}</b> · change it
         val title = if (library) "⭐ <b>Your library</b>" else "🕘 <b>Recently opened</b>"
         if (items.isEmpty()) {
             val t = if (library) "$title\n\nEmpty — tap ⭐ Save on a novel to keep it here." else "$title\n\nNothing yet. Search for a novel!"
-            if (messageId == null || !tg.editMessage(chatId, messageId, t)) tg.sendMessage(chatId, t)
+            val kb = keyboard(listOf(listOf(Btn("🏠 Menu", "home"))))
+            if (messageId == null || !tg.editMessage(chatId, messageId, t, kb)) tg.sendMessage(chatId, t, kb)
             return
         }
         val per = 10
         val pages = (items.size + per - 1) / per
         val p = page.coerceIn(0, pages - 1)
-        val rows = items.drop(p * per).take(per).map { listOf(Btn(Ui.cut("${it.title} · ${it.api}", 60), "n:${it.ref}")) }.toMutableList()
         val k = if (library) "L" else "H"
+        val rows = items.drop(p * per).take(per).map { listOf(Btn(Ui.cut("${it.title} · ${it.api}", 60), "n:${it.ref}:$k$p")) }.toMutableList()
         val nav = mutableListOf<Btn>()
         if (p > 0) nav += Btn("⬅️", "ls:$k:${p - 1}")
         if (pages > 1) nav += Btn("${p + 1}/$pages", "noop")
         if (p < pages - 1) nav += Btn("➡️", "ls:$k:${p + 1}")
         rows += nav
+        rows += listOf(Btn(if (library) "🕘 History" else "⭐ Library", if (library) "ls:H:0" else "ls:L:0"), Btn("🏠 Menu", "home"))
         val t = "$title (${items.size})"
         if (messageId == null || !tg.editMessage(chatId, messageId, t, keyboard(rows))) tg.sendMessage(chatId, t, keyboard(rows))
     }
@@ -796,6 +837,7 @@ Current format: <b>${BookFormat.of(user.settings.format).label}</b> · change it
             listOf(Btn("🌍 Languages", "st:langs"), Btn("🌐 Sites", "st:prov:0")),
             listOf(Btn("📝 Author notes: ${if (s.stripAuthorNotes) "remove" else "keep"}", "st:notes")),
             listOf(Btn("🖼 Covers: ${if (s.sendCover) "on" else "off"}", "st:cover")),
+            listOf(Btn("🏠 Menu", "home")),
         )
         if (messageId == null || !tg.editMessage(chatId, messageId, text, keyboard(rows))) tg.sendMessage(chatId, text, keyboard(rows))
     }
@@ -876,7 +918,7 @@ Current format: <b>${BookFormat.of(user.settings.format).label}</b> · change it
     }
 
     private suspend fun expired(chatId: Long) {
-        tg.sendMessage(chatId, "⌛ This button expired. Please search again.")
+        tg.sendMessage(chatId, "⌛ This button expired. Please search again.", keyboard(listOf(listOf(Btn("🏠 Menu", "home")))))
     }
 
     // ------------------------------------------------------------------ callbacks
@@ -898,6 +940,14 @@ Current format: <b>${BookFormat.of(user.settings.format).label}</b> · change it
 
         when (p[0]) {
             "noop" -> tg.answerCallback(id)
+            "home" -> { tg.answerCallback(id); mainMenu(chatId, textMid) }
+            "alt" -> {
+                val ref = Store.resolve(p[1]) ?: run { tg.answerCallback(id, "⌛ Expired"); return }
+                tg.answerCallback(id, "🔍 Searching other sites…")
+                val title = ref.title
+                if (title.isNullOrBlank()) tg.sendMessage(chatId, "Send me the novel name to search all sites 🔍")
+                else search(chatId, userId, title, null)
+            }
             "help" -> { tg.answerCallback(id); help(chatId) }
             "src" -> { tg.answerCallback(id); sources(chatId) }
             "s" -> {
@@ -909,11 +959,16 @@ Current format: <b>${BookFormat.of(user.settings.format).label}</b> · change it
                 val r = s.results.getOrNull(p[2].toInt()) ?: return tg.answerCallback(id)
                 tg.answerCallback(id, "📖 ${Ui.cut(r.name, 40)}")
                 val ref = Store.ref(r.apiName, r.url, r.name)
-                openNovel(chatId, ref, Store.resolve(ref)!!, userId)
+                val backBtn = Btn("⬅️ Back to results", "s:${s.id}:${p[2].toInt() / perPage}")
+                openNovel(chatId, ref, Store.resolve(ref)!!, userId, back = backBtn)
             }
             "n" -> {
                 val ref = Store.resolve(p[1]) ?: run { tg.answerCallback(id, "⌛ Expired"); return }
-                tg.answerCallback(id); openNovel(chatId, p[1], ref, userId)
+                // "n:<ref>:L0" / "n:<ref>:H2" = opened from library/history page => back goes there
+                val backBtn = p.getOrNull(2)?.takeIf { it.length >= 2 && it[0] in "LH" }?.let {
+                    Btn(if (it[0] == 'L') "⬅️ Back to library" else "⬅️ Back to history", "ls:${it[0]}:${it.drop(1).toIntOrNull() ?: 0}")
+                }
+                tg.answerCallback(id); openNovel(chatId, p[1], ref, userId, back = backBtn)
             }
             "rf" -> {
                 val ref = Store.resolve(p[1]) ?: run { tg.answerCallback(id, "⌛ Expired"); return }
@@ -936,7 +991,8 @@ Current format: <b>${BookFormat.of(user.settings.format).label}</b> · change it
             "dc" -> {
                 tg.answerCallback(id)
                 pending[userId] = Pending.Range(p[1], fmtOf(p[2]))
-                tg.sendMessage(chatId, "✏️ Send the chapter range, e.g. <code>1-100</code>, <code>250-</code> (to the end), <code>last 30</code>.\n/cancel to abort.")
+                tg.sendMessage(chatId, "✏️ Send the chapter range, e.g. <code>1-100</code>, <code>250-</code> (to the end), <code>last 30</code>.\n/cancel to abort.",
+                    keyboard(listOf(listOf(Btn("⬅️ Back", "d:${p[1]}")))))
             }
             "ep" -> { tg.answerCallback(id); downloadEpubResponse(chatId, userId, p[1]) }
             "x" -> {

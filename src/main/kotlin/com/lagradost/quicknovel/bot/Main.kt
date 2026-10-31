@@ -26,6 +26,7 @@ Usage:
   quicknovel-bot test [query]            search test for every provider
   quicknovel-bot check [query]           full test per site (search, novel, 1 chapter)
   quicknovel-bot auto-test               run the auto sender once (book -> ./out, no Telegram)
+  quicknovel-bot mainpages              lists the auto scraper uses (popular / latest per site)
   quicknovel-bot mirrors <url>           other sites that have the same novel (used for failed chapters)
         """.trimIndent()
     )
@@ -74,7 +75,7 @@ fun main(args: Array<String>) {
             val q = args.drop(1).joinToString(" ").ifBlank { "the" }
             val sem = Semaphore(4)
             val res = coroutineScope {
-                Providers.allIncludingRemoved.map { api ->
+                (if (Providers.allowedSites != null) Providers.all else Providers.allIncludingRemoved).map { api ->
                     async(Dispatchers.IO) {
                         sem.withPermit {
                             val err: String? = withTimeoutOrNull(240_000L) { Providers.check(api, q) ?: "OK" }.let { if (it == null) "timeout" else if (it == "OK") null else it }
@@ -98,7 +99,9 @@ fun main(args: Array<String>) {
             }, { "bot" }, targetOverride = setOf(0L))
             auto.load()
             println("already sent: ${auto.count}")
-            println(if (auto.sendOne()) "OK - novel sent" else "no new novel found")
+            val before = auto.count
+            val found = auto.sendOne()
+            println(when { auto.count > before -> "OK - novel sent"; found -> "a novel was tried but skipped (duplicate / failed), run again"; else -> "no new novel found" })
             Store.save(force = true)
         }
         "mirrors" -> runBlocking {
@@ -108,6 +111,23 @@ fun main(args: Array<String>) {
             Mirrors.find(api, r.name, r.data.size).forEach { m ->
                 val first = r.data.first()
                 println("${m.api.name}: ${m.chapters.size} chapters, '${first.name}' -> ${Mirrors.match(m, 0, first, r.data.size)?.url}")
+            }
+        }
+        "mainpages" -> runBlocking {
+            // what the auto scraper sees: first page of every list of every site
+            for (api in Providers.all) {
+                if (!api.hasMainPage) { println("%-14s no main page (search only)".format(api.name)); continue }
+                for ((label, order) in api.orderBys.ifEmpty { listOf("default" to null) }) {
+                    val r = withTimeoutOrNull(60_000L) {
+                        runCatching { Providers.withFallback(api) { it.loadMainPage(1, it.mainCategories.firstOrNull()?.second, order, it.tags.firstOrNull()?.second) }.list }
+                    }
+                    val msg = when {
+                        r == null -> "timeout"
+                        r.isFailure -> "ERROR " + Providers.friendlyError(r.exceptionOrNull()!!)
+                        else -> "${r.getOrNull()!!.size} novels, e.g. ${r.getOrNull()!!.firstOrNull()?.name}"
+                    }
+                    println("%-14s %-22s %s".format(api.name, label.take(22), msg)); System.out.flush()
+                }
             }
         }
         "-h", "--help", "help" -> usage()

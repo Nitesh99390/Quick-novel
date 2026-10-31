@@ -96,6 +96,9 @@ class Bot(private val tg: TelegramApi) {
                 "queue" to "📥 Your running downloads",
                 "cancel" to "✖️ Cancel your downloads / input",
                 "sources" to "🌐 Supported websites",
+                "auto" to "🤖 Auto scraper status (admin)",
+                "skip" to "⏭ Skip the novel being scraped (admin)",
+                "stats" to "📊 Bot stats (admin)",
                 "help" to "❓ How to use the bot",
             )
         )
@@ -150,8 +153,12 @@ class Bot(private val tg: TelegramApi) {
 
     private fun isAdmin(id: Long) = id in Config.adminIds
 
+    /**
+     * Private bot: only ADMIN_IDS may use it (default). Everybody else is ignored.
+     * ADMIN_ONLY=false restores the old behaviour (ALLOWED_USERS / everybody, minus banned users).
+     */
     private fun allowed(id: Long): Boolean =
-        isAdmin(id) || ((Config.allowedUsers.isEmpty() || id in Config.allowedUsers) && Store.users[id]?.banned != true)
+        isAdmin(id) || (!Config.adminOnly && (Config.allowedUsers.isEmpty() || id in Config.allowedUsers) && Store.users[id]?.banned != true)
 
     private fun displayName(from: JsonNode) =
         listOf(from.path("first_name").asText(""), from.path("last_name").asText("")).joinToString(" ").trim().ifEmpty { null }
@@ -167,8 +174,9 @@ class Bot(private val tg: TelegramApi) {
         if (text.isEmpty()) return
 
         if (!allowed(userId)) {
-            if (m.path("chat").path("type").asText() == "private")
-                tg.sendMessage(chatId, "🔒 You are not allowed to use this bot.\nYour id: <code>$userId</code>")
+            // non-admins get one short answer in private chats, nothing in groups; no user data is stored
+            if (m.path("chat").path("type").asText() == "private" && text.startsWith("/"))
+                tg.sendMessage(chatId, "🔒 This is a private bot. Only its admin can use it.\nYour id: <code>$userId</code>")
             return
         }
         val user = Store.user(userId, displayName(from), from.path("username").asText(null))
@@ -239,7 +247,8 @@ class Bot(private val tg: TelegramApi) {
                 tg.sendMessage(chatId, "🧹 Deleted $n cached chapters (${Ui.size(b)}) older than $days days.")
             }
             "testproviders" -> if (isAdmin(userId)) testProviders(chatId, arg.ifBlank { "the" })
-            "auto" -> if (isAdmin(userId)) autoCommand(chatId, arg.lowercase())
+            "auto" -> if (isAdmin(userId)) autoCommand(chatId, arg)
+            "skip" -> if (isAdmin(userId)) autoCommand(chatId, "skip")
             else -> tg.sendMessage(chatId, "Unknown command. See /help")
         }
     }
@@ -289,6 +298,10 @@ Current format: <b>${BookFormat.of(user.settings.format).label}</b> · change it
 ⭐ /library — novels you saved · 🕘 /history
 ⚙️ /settings — default format, languages, enable/disable sites, author notes
 📥 /queue · ✖️ /cancel
+
+🤖 <b>Auto scraper (admin)</b>
+/auto — status · <code>/auto on</code> / <code>off</code> · /skip — skip current novel
+<code>/auto sent</code> — sent novels · <code>/auto forget title</code> — allow a novel again
 
 <i>Big novels are split into several volumes automatically so they fit Telegram's file limit. Chapters are cached, so re-downloads and updates are fast. When a site can't deliver some chapters, the bot fetches them from another site that has the same novel.</i>""",
             keyboard(listOf(listOf(Btn("🏠 Menu", "home"))))
@@ -906,22 +919,39 @@ Current format: <b>${BookFormat.of(user.settings.format).label}</b> · change it
         else { tg.deleteMessage(chatId, msg); text.chunked(3900).forEach { tg.sendMessage(chatId, it.replace(Regex("<[^>]*$"), "")) } }
     }
 
-    private suspend fun autoCommand(chatId: Long, arg: String) {
+    private suspend fun autoCommand(chatId: Long, argRaw: String) {
+        val arg = argRaw.substringBefore(' ').lowercase()
+        val rest = argRaw.substringAfter(' ', "").trim()
         when (arg) {
-            "on" -> { auto.setEnabled(true); tg.sendMessage(chatId, "🤖 Auto send <b>ON</b> — new novels will be sent automatically.") }
-            "off" -> { auto.setEnabled(false); tg.sendMessage(chatId, "⏸ Auto send <b>OFF</b>.") }
-            "now" -> { auto.runNow(); tg.sendMessage(chatId, "▶️ Looking for a new novel right now…") }
+            "on", "start" -> { auto.setEnabled(true); tg.sendMessage(chatId, "🤖 Auto scraper <b>ON</b> — novels are scraped one after another 24/7 and sent to the dump channel.") }
+            "off", "stop" -> { auto.setEnabled(false); tg.sendMessage(chatId, "⏸ Auto scraper <b>OFF</b>. The current novel continues where it stopped after <code>/auto on</code>.") }
+            "now" -> { auto.runNow(); tg.sendMessage(chatId, "▶️ Starting the next novel right now…") }
+            "skip" -> {
+                val t = auto.skipCurrent()
+                tg.sendMessage(chatId, if (t == null) "Nothing is being scraped right now." else "⏭ Skipped <b>${h(Ui.cut(t, 100))}</b> — it will never be scraped again. Next novel starts now.")
+            }
+            "forget" -> {
+                if (rest.isBlank()) tg.sendMessage(chatId, "Usage: <code>/auto forget Novel Title</code> (or the novel url) — lets the bot scrape that novel again.")
+                else { val n = auto.forget(rest); tg.sendMessage(chatId, if (n == 0) "Not found in the sent list." else "✅ Removed $n entry. It can be scraped again.") }
+            }
+            "sent", "list" -> {
+                val list = auto.recent(30)
+                tg.sendMessage(chatId, if (list.isEmpty()) "Nothing sent yet." else "📚 <b>Last ${list.size} of ${auto.count} sent novels</b>\n\n" +
+                        list.joinToString("\n") { "• ${h(Ui.cut(it.title, 60))} <i>(${h(it.api)}, ${it.chapters} ch)</i>" })
+            }
             else -> {
                 val fmt = java.text.SimpleDateFormat("dd MMM HH:mm")
-                val recent = auto.recent(10).joinToString("\n") { "• ${h(Ui.cut(it.title, 60))} <i>(${h(it.api)}, ${it.chapters} ch)</i>" }
-                tg.sendMessage(chatId, """🤖 <b>Auto send</b>: ${if (auto.enabled) "✅ ON" else "⏸ OFF"}
-📤 To: ${auto.targets.joinToString { "<code>$it</code>" }.ifEmpty { "nobody (set AUTO_CHAT_IDS or ADMIN_IDS)" }}
-⏱ Every ${Config.autoIntervalMin} min · ${Config.autoNovelsPerRun} novel(s) per run · max ${if (Config.autoMaxChapters == 0) "all" else Config.autoMaxChapters} chapters
-📚 Already sent: ${auto.count} (never sent twice)
-""" + (auto.running?.let { "⚙️ Now: <i>${h(it)}</i>\n" } ?: "") +
-                        (if (auto.nextRun > 0) "🕒 Next run: ${fmt.format(java.util.Date(auto.nextRun))}\n" else "") +
+                val recent = auto.recent(5).joinToString("\n") { "• ${h(Ui.cut(it.title, 60))} <i>(${h(it.api)}, ${it.chapters} ch)</i>" }
+                tg.sendMessage(chatId, """🤖 <b>Auto scraper (24/7)</b>: ${if (auto.enabled) "✅ ON" else "⏸ OFF"}
+📤 Dump channel: ${auto.targets.joinToString { "<code>$it</code>" }.ifEmpty { "nobody (set DUMP_CHANNEL_ID)" }}
+🌐 Sites: ${h(auto.sources().joinToString { it.name })}
+📖 Mode: complete novel${if (Config.autoMaxChapters > 0) " (max ${Config.autoMaxChapters} ch)" else ""} → send → next novel after ${Config.autoDelaySec}s
+📚 Sent: ${auto.count} total · ${auto.sentThisSession} since start (never sent twice)
+""" + (auto.currentTitle?.let { "🔄 Current: <b>${h(Ui.cut(it, 100))}</b>\n" } ?: "") +
+                        (auto.running?.let { "⚙️ <i>${h(Ui.cut(it, 200))}</i>\n" } ?: "") +
+                        (if (auto.lastSent > 0) "🕒 Last sent: ${fmt.format(java.util.Date(auto.lastSent))}\n" else "") +
                         (if (recent.isNotEmpty()) "\n<b>Last sent</b>\n$recent\n" else "") +
-                        "\n<code>/auto on</code> · <code>/auto off</code> · <code>/auto now</code>")
+                        "\n<code>/auto on</code> · <code>/auto off</code> · <code>/auto skip</code> · <code>/auto now</code>\n<code>/auto sent</code> · <code>/auto forget title</code>")
             }
         }
     }

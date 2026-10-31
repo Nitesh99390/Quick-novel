@@ -59,4 +59,38 @@ object Config {
 
     /** Include disabled (commented out upstream) providers as well */
     val includeDisabled: Boolean by lazy { env("INCLUDE_DISABLED_PROVIDERS")?.let { it == "1" || it.equals("true", true) } ?: false }
+
+    private fun bool(key: String, def: Boolean) = env(key)?.let { it == "1" || it.equals("true", true) || it.equals("yes", true) || it.equals("on", true) } ?: def
+    private fun list(key: String): Set<String> = env(key)?.split(',', ';')?.map { it.trim() }?.filter { it.isNotEmpty() }?.toSet() ?: emptySet()
+
+    // ---------------------------------------------------------------- auto sender
+
+    /** Find new novels by itself and send them to [autoChatIds] (default on) */
+    val autoSend: Boolean by lazy { bool("AUTO_SEND", true) }
+
+    /** Chats / channels / groups that receive the novels. Empty = all ADMIN_IDS */
+    val autoChatIds: Set<Long> by lazy { ids("AUTO_CHAT_IDS") }
+
+    /** Minutes between two runs */
+    val autoIntervalMin: Int by lazy { int("AUTO_INTERVAL_MIN", 30).coerceAtLeast(1) }
+
+    /** Novels sent per run */
+    val autoNovelsPerRun: Int by lazy { int("AUTO_NOVELS_PER_RUN", 1).coerceIn(1, 20) }
+
+    /** Max chapters per auto novel (0 = all). Big novels take very long. */
+    val autoMaxChapters: Int by lazy { int("AUTO_MAX_CHAPTERS", 500).coerceAtLeast(0) }
+
+    /** Novels with fewer chapters are skipped */
+    val autoMinChapters: Int by lazy { int("AUTO_MIN_CHAPTERS", 5).coerceAtLeast(1) }
+
+    val autoFormat: String by lazy { env("AUTO_FORMAT") ?: "EPUB" }
+
+    /** Only these languages (e.g. "en"). Empty = all */
+    val autoLanguages: Set<String> by lazy { list("AUTO_LANGUAGES").ifEmpty { setOf("en") } }
+
+    /** How many popular/latest pages of a site are searched for a not-yet-sent novel */
+    val autoMaxPages: Int by lazy { int("AUTO_MAX_PAGES", 10).coerceIn(1, 100) }
+
+    /** Only these sites (provider names). Empty = every working site */
+    val autoSites: Set<String> by lazy { list("AUTO_SITES") }
 }

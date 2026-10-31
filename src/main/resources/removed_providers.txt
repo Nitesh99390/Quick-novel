@@ -1,0 +1,27 @@
+# Sites that do NOT deliver novels any more (search / novel page / chapters broken or blocked).
+# They are hidden from search, browse, mirrors and the auto sender.
+# Found with:  java -jar build/libs/quicknovel-bot.jar check
+# Bring one back without rebuilding:  KEEP_PROVIDERS=Name1,Name2 in .env
+AllNovel   # search: no results (checked 2026-10-31)
+Annas Archive   # search: no results (checked 2026-10-31)
+Chikari   # search: no results (checked 2026-10-31)
+Chrysanthemum Garden   # search: no results (checked 2026-10-31)
+FanMTL   # search: no results (checked 2026-10-31)
+FenrirRealm   # chapter: empty (checked 2026-10-31)
+Galaxy Novels   # search: no results (checked 2026-10-31)
+Graycity   # search: no results (checked 2026-10-31)
+KolNovel   # search: no results (checked 2026-10-31)
+Light Novel Translations   # search: no results (checked 2026-10-31)
+MeioNovel   # search: no results (checked 2026-10-31)
+Nova   # search: no results (checked 2026-10-31)
+NovelFull-Net   # search: no results (checked 2026-10-31)
+NovLove   # search: no results (checked 2026-10-31)
+RanobeHub   # search: no results (checked 2026-10-31)
+Ranobes   # load: No data (checked 2026-10-31)
+Ranovel   # chapter: empty (checked 2026-10-31)
+Royal Road   # search: no results (checked 2026-10-31)
+SakuraNovel   # search: no results (checked 2026-10-31)
+Scribblehub   # search: no results (checked 2026-10-31)
+Wattpad   # search: no results (checked 2026-10-31)
+WTR-LAB   # search: no results (checked 2026-10-31)
+WuxiaBox   # search: no results (checked 2026-10-31)

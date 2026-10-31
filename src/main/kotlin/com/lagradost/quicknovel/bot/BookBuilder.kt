@@ -120,6 +120,33 @@ p { margin: 0 0 0.8em; text-indent: 0; }
         BookFormat.HTML -> html(meta, chapters)
     }
 
+    /** "Title (Ch 1-50) - Vol 01.epub" */
+    fun fileName(title: String, a: Int, b: Int, total: Int, ext: String, part: Int? = null): String {
+        val clean = title.replace(Regex("[\\\\/:*?\"<>|\\p{Cntrl}]"), "").replace(Regex("\\s+"), " ").trim().take(80).ifBlank { "novel" }
+        val range = if (a == 1 && b == total) "" else " (Ch $a-$b)"
+        val p = part?.let { " - Vol ${"%02d".format(it)}" } ?: ""
+        return "$clean$range$p.$ext"
+    }
+
+    /**
+     * Builds the book and splits it into volumes when a file would be larger than [maxBytes]
+     * (Telegram upload limit). Returns (file name, bytes) pairs.
+     */
+    fun buildVolumes(format: BookFormat, meta: BookMeta, chapters: List<Chapter>, maxBytes: Long, title: String, total: Int): List<Pair<String, ByteArray>> {
+        var parts = 1
+        while (true) {
+            val chunks = if (parts == 1) listOf(chapters) else chapters.chunked((chapters.size + parts - 1) / parts)
+            val files = chunks.mapIndexed { i, chs ->
+                val f = chs.first().index + 1; val l = chs.last().index + 1
+                val m = if (parts == 1) meta else meta.copy(title = "${meta.title} (Vol ${i + 1}: Ch $f-$l)")
+                fileName(title, f, l, if (parts == 1) total else -1, format.ext, if (parts == 1) null else i + 1) to build(format, m, chs)
+            }
+            val biggest = files.maxOf { it.second.size }
+            if (biggest <= maxBytes || parts >= chapters.size) return files
+            parts = maxOf(parts + 1, (parts * biggest.toDouble() / maxBytes * 1.1).toInt() + 1)
+        }
+    }
+
     // ------------------------------------------------------------------ TXT
 
     private fun txt(meta: BookMeta, chapters: List<Chapter>): ByteArray = buildString {

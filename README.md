@@ -1,6 +1,6 @@
 # 📚 QuickNovel Telegram Bot
 
-Ek Telegram bot jo **58 web-novel websites** par ek saath search karta hai aur kisi bhi novel ko
+Ek Telegram bot jo **35 chalti hui web-novel websites** par ek saath search karta hai aur kisi bhi novel ko
 saaf-suthri **EPUB / TXT / HTML** book bana ke Telegram par hi bhej deta hai.
 
 Ismein [QuickNovel](https://github.com/LagradOst/QuickNovel) Android app ka **original provider (scraper) code**
@@ -32,6 +32,13 @@ Isliye jab upstream mein nayi sites ya fixes aate hain, to bas ek `git submodule
 
 ## ✨ Features
 
+- 🤖 **Auto Send (naya)**: bot **khud se** sites ki popular/latest list se naye novels dhoondhta hai, book banata hai aur
+  aapko Telegram par bhejta rehta hai. Aapki permission ya koi button dabane ki zarurat nahi.
+  - Jo novel ek baar bhej diya, woh `data/sent.json` mein save hota hai aur **dobara kabhi scrape ya send nahi hota**
+    (site+link aur novel ke naam dono se check hota hai, isliye doosri site par wahi novel ho to bhi skip hota hai)
+  - Jo novel download nahi ho pata, use 3 baar ke baad chhod deta hai
+  - Details: [🤖 Auto Send](#-auto-send-khud-se-novel-bhejna)
+- 🧹 **Kharab sites hata di gayi**: jo 23 sites novel nahi de rahi thi, woh search, browse aur auto send se hata di gayi hain
 - 🔍 **Parallel search**: saari sites par ek saath search, live progress ke saath, aur results smart ranking se sort hote hain
 - 🔗 **Link paste karo**: kisi supported site ka link bhejo, novel seedha khul jayega
 - 🧭 **Browse**: har site ke popular / latest novels dekho (paging ke saath)
@@ -45,7 +52,7 @@ Isliye jab upstream mein nayi sites ya fixes aate hain, to bas ek `git submodule
   - badi books apne aap **volumes mein split** ho jaati hain, taaki Telegram ki 50 MB limit mein fit ho sakein
 - ⭐ Har user ki apni **Library** aur 🕘 **History**
 - ⚙️ Har user ki apni settings: default format, search languages, sites on/off, author notes hatao, cover bhejo
-- 👮 Admin ke liye: `/stats`, `/broadcast`, `/ban`, `/unban`, `/cleancache`, `/testproviders`
+- 👮 Admin ke liye: `/auto`, `/stats`, `/broadcast`, `/ban`, `/unban`, `/cleancache`, `/testproviders`
 - 🛡 Cloudflare se protected sites ke liye optional **FlareSolverr** support
 - **Database ki zarurat nahi**: saara data `data/store.json` mein rehta hai
 
@@ -344,7 +351,9 @@ java -jar build/libs/quicknovel-bot.jar info https://novelfire.net/book/shadow-s
 java -jar build/libs/quicknovel-bot.jar download https://novelfire.net/book/shadow-slave 1 50 epub
 #                                                 ^ url                                  from to format(epub|txt|html)
 #  → book ./out/ folder mein save hogi
-java -jar build/libs/quicknovel-bot.jar test "the"                   # har site ka health check (results, time, error)
+java -jar build/libs/quicknovel-bot.jar test "the"                   # har site ka search test (results, time, error)
+java -jar build/libs/quicknovel-bot.jar check                        # poora test: search → novel page → 1 chapter, har site ka
+java -jar build/libs/quicknovel-bot.jar auto-test                    # auto sender ek baar chalao (book ./out mein, Telegram nahi)
 ```
 
 `run.sh` ke through bhi chala sakte ho: `./run.sh search "lord of the mysteries"`
@@ -410,6 +419,9 @@ FLARESOLVERR_URL=http://localhost:8191/v1
 | `/ban <id>` / `/unban <id>` | User ko block / unblock karo |
 | `/cleancache [days]` | Itne din se purane cached chapters delete karo |
 | `/testproviders [query]` | Saari sites ka health check |
+| `/auto` | Auto send ka status: on/off, kitne novels bhej chuka, aakhri 10 novels, agla run kab |
+| `/auto on` / `/auto off` | Auto send chalu / band karo (restart ke baad bhi yaad rehta hai) |
+| `/auto now` | Abhi turant ek naya novel dhoondh ke bhejo |
 
 ---
 
@@ -484,6 +496,50 @@ Agar koi provider JVM par compile nahi hota, to use skip kar do:
 
 ---
 
+## 🤖 Auto Send (khud se novel bhejna)
+
+Bot start hote hi ek background kaam chalta hai jo **bina aapse pooche** naye novels bhejta rehta hai:
+
+1. Har `AUTO_INTERVAL_MIN` minute (default 30) mein bot ek-ek karke working sites ki **popular / latest list** dekhta hai.
+2. List mein pehla aisa novel chunta hai jo **pehle kabhi nahi bheja gaya**. Bheje hue novels bina load kiye hi skip ho jaate hain.
+3. Novel ke chapters download karta hai (default pehle 500, `AUTO_MAX_CHAPTERS`), EPUB banata hai, aur cover ke saath bhejta hai.
+4. Novel `data/sent.json` mein likh diya jaata hai. Restart ke baad bhi yaad rehta hai, isliye **wahi novel dobara nahi aayega**.
+   Check site+link se bhi hota hai aur naam se bhi, isliye agar wahi novel doosri site par bhi hai to bhi skip ho jayega.
+5. Agar 10% se zyada chapters fail ho jaayein, to adhoori book nahi bhejta. 3 baar fail hone ke baad woh novel chhod deta hai.
+
+**Kisko bhejta hai?** `AUTO_CHAT_IDS` mein jo ids hain unko. Agar yeh khaali hai to `ADMIN_IDS` ko.
+Channel ya group mein bhejne ke liye bot ko wahan admin banao aur uski id (`-100…`) `AUTO_CHAT_IDS` mein daalo.
+
+```env
+ADMIN_IDS=987654321
+AUTO_SEND=true
+AUTO_CHAT_IDS=987654321,-1001234567890   # aap + ek channel
+AUTO_INTERVAL_MIN=30
+AUTO_NOVELS_PER_RUN=1
+AUTO_MAX_CHAPTERS=500                     # 0 = saare chapters
+AUTO_LANGUAGES=en
+AUTO_SITES=                               # khaali = saari working sites, ya: NovelBin,FreeWebNovel,LibRead
+```
+
+Telegram se control: `/auto` (status), `/auto off`, `/auto on`, `/auto now`.
+Sab kuch dobara shuru se bhejna ho to bot band karke `data/sent.json` delete kar do.
+
+### Hatayi gayi sites
+
+`java -jar build/libs/quicknovel-bot.jar check` se har site ka poora test kiya gaya (search → novel → chapter ka text).
+Jo **23 sites** do alag tests mein fail hui, woh [`src/main/resources/removed_providers.txt`](src/main/resources/removed_providers.txt)
+mein hain aur bot unhe use nahi karta: AllNovel, Annas Archive, Chikari, Chrysanthemum Garden, FanMTL, FenrirRealm,
+Galaxy Novels, Graycity, KolNovel, Light Novel Translations, MeioNovel, Nova, NovelFull-Net, NovLove, RanobeHub, Ranobes,
+Ranovel, Royal Road, SakuraNovel, Scribblehub, Wattpad, WTR-LAB, WuxiaBox.
+
+Agar baad mein koi site theek ho jaaye, to bina rebuild ke `.env` mein `KEEP_PROVIDERS=Royal Road,Wattpad` likh do.
+Aur koi site hatani ho to `REMOVED_PROVIDERS=Name1,Name2`.
+
+> Note: kuch sites (jaise Royal Road, Scribblehub) Cloudflare se datacenter IP ko block karti hain. Aapke server par
+> `FLARESOLVERR_URL` ke saath chal sakti hain. Tab unhe `KEEP_PROVIDERS` se wapas la sakte ho.
+
+---
+
 ## 🛠 Troubleshooting
 
 | Problem | Solution |
@@ -492,7 +548,8 @@ Agar koi provider JVM par compile nahi hota, to use skip kar do:
 | `MainAPI.kt` not found / `upstream/QuickNovel` khaali hai | `git submodule update --init --depth 1` |
 | Build mein `OutOfMemoryError` / `Metaspace` | `gradle.properties` mein `-Xmx600m` ko `-Xmx1500m` karo, ya swap add karo (neeche dekho) |
 | `Unsupported class file major version` | Java 17+ chahiye: `java -version` check karo |
-| Kuch sites results nahi de rahi | `java -jar build/libs/quicknovel-bot.jar test` chalao. Cloudflare wali sites ke liye FlareSolverr lagao |
+| Auto send kuch nahi bhej raha | `/auto` se status dekho. `ADMIN_IDS` ya `AUTO_CHAT_IDS` set hona chahiye, aur aapne bot ko pehle `/start` bheja ho. Channel ke liye bot admin hona chahiye |
+| Kuch sites results nahi de rahi | `java -jar build/libs/quicknovel-bot.jar check` chalao. Cloudflare wali sites ke liye FlareSolverr lagao |
 | Chapters fail ho rahe hain / site block kar rahi hai | `CHAPTER_PARALLELISM=1` ya `2` karo. Missing chapters bot doosri sites se laane ki koshish karta hai. `java -jar build/libs/quicknovel-bot.jar mirrors <novel-url>` se dekho kaunsi sites par wahi novel hai |
 | `Royal Road failed … 403 / error code: 1005` | Royal Road (Cloudflare) aapke server ke IP/ASN ko block kar raha hai (aksar datacenter/VPS IP). Bot ab app-API fail hone par website scraper try karta hai, lekin pura IP block ho to koi code fix nahi kar sakta: doosra VPS/residential IP use karo, ya wahi novel kisi doosri site se lo |
 | `409 Conflict: terminated by other getUpdates` | Bot do jagah chal raha hai. Ek instance band karo |

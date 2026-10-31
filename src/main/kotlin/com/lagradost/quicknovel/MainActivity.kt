@@ -45,11 +45,21 @@ class MainActivity private constructor() {
             responseParser = responseParser
         ).apply {
             defaultHeaders = mapOf("user-agent" to USER_AGENT)
+        }.let { base ->
+            // On a server any site may start showing Cloudflare challenges after bursts of requests.
+            // When FlareSolverr is configured, let every provider (not only usesCloudFlareKiller ones)
+            // solve them transparently. The interceptor is a no-op for normal responses.
+            if (!com.lagradost.quicknovel.network.FlareSolverr.enabled) base
+            else Requests(
+                base.baseClient.newBuilder().addInterceptor(CloudflareKiller()).build(),
+                responseParser = responseParser
+            ).apply { defaultHeaders = base.defaultHeaders }
         }
 
         val appWithInterceptor by lazy {
             Requests(
-                baseClient = app.baseClient.newBuilder()
+                baseClient = if (com.lagradost.quicknovel.network.FlareSolverr.enabled) app.baseClient
+                else app.baseClient.newBuilder()
                     .addInterceptor(CloudflareKiller())
                     .build(),
                 responseParser = app.responseParser

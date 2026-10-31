@@ -1,0 +1,21 @@
+services:
+  bot:
+    build: .
+    container_name: quicknovel-bot
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      FLARESOLVERR_URL: http://flaresolverr:8191/v1
+      DATA_DIR: /app/data
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      - flaresolverr
+
+  # Headless browser that solves Cloudflare challenges for the scrapers
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: flaresolverr
+    restart: unless-stopped
+    environment:
+      LOG_LEVEL: warning

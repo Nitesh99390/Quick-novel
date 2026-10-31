@@ -23,6 +23,8 @@ dependencies {
     implementation("org.json:json:20251224")
     // jsoup 1.22 is annotated with JSpecify nullness annotations
     implementation("org.jspecify:jspecify:1.0.0")
+    // WebP covers (most novel sites) -> JPEG for e-readers & Telegram thumbnails
+    implementation("com.twelvemonkeys.imageio:imageio-webp:3.12.0")
 
     testImplementation(kotlin("test"))
 }

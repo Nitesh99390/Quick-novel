@@ -17,6 +17,7 @@ Usage:
   quicknovel-bot info <url>              load a novel page
   quicknovel-bot download <url> [from] [to] [epub|txt|html]   build a book into ./out
   quicknovel-bot test [query]            search test for every provider
+  quicknovel-bot mirrors <url>           other sites that have the same novel (used for failed chapters)
         """.trimIndent()
     )
 }
@@ -46,7 +47,7 @@ fun main(args: Array<String>) {
             val to = (args.getOrNull(3)?.toIntOrNull() ?: r.data.size).coerceAtMost(r.data.size)
             val fmt = BookFormat.of(args.getOrNull(4))
             val sel = (from - 1 until to).map { it to r.data[it] }
-            val (chapters, failed) = Downloader.download(api, sel, true) { println("  ${it.done}/${it.total} (failed ${it.failed})") }
+            val (chapters, failed) = Downloader.download(api, sel, true, r.name, r.data) { println("  ${it.done}/${it.total} (failed ${it.failed})" + (it.stage?.let { s -> " - $s" } ?: "")) }
             val cover = Downloader.cover(api, r.posterUrl, r.posterHeaders)
             val bytes = BookBuilder.build(fmt, BookMeta(r.name, r.author, r.synopsis, api.name, r.url, r.tags.orEmpty(), api.lang, cover), chapters)
             val out = File("out").apply { mkdirs() }.resolve("${r.name.replace(Regex("[^\\w .-]"), "")}.${fmt.ext}")
@@ -57,6 +58,15 @@ fun main(args: Array<String>) {
             val q = args.drop(1).joinToString(" ").ifBlank { "the" }
             Providers.searchAll(q, Providers.all).sortedBy { it.api.name }.forEach {
                 println("%-28s %4d  %5.1fs  %s".format(it.api.name, it.results.size, it.millis / 1000.0, it.error ?: ""))
+            }
+        }
+        "mirrors" -> runBlocking {
+            val url = args.getOrNull(1) ?: return@runBlocking usage()
+            val api = Providers.forUrl(url) ?: error("unsupported site")
+            val r = Providers.load(api, url) as? StreamResponse ?: error("no chapters")
+            Mirrors.find(api, r.name, r.data.size).forEach { m ->
+                val first = r.data.first()
+                println("${m.api.name}: ${m.chapters.size} chapters, '${first.name}' -> ${Mirrors.match(m, 0, first, r.data.size)?.url}")
             }
         }
         "-h", "--help", "help" -> usage()

@@ -389,6 +389,7 @@ FLARESOLVERR_URL=http://localhost:8191/v1
 | Command | Kaam |
 |---|---|
 | `/start` | Welcome message |
+| `/menu` | 🏠 Main menu (har screen par ⬅️ Back / 🏠 Menu buttons bhi hain) |
 | `/search <naam>` (ya `/s`) | Novel search karo. Bina command ke sirf naam bhejne se bhi search hota hai |
 | `/browse` | Kisi site ke popular / latest novels |
 | `/library` | Aapke saved (⭐) novels |
@@ -423,7 +424,10 @@ FLARESOLVERR_URL=http://localhost:8191/v1
      - Custom range ke examples: `20-150`, `300-` (300 se aakhir tak), `last 30`
    - ⭐ **Library mein add karo**
 5. Progress bar aur ETA dikhega. Book ready hote hi EPUB/TXT/HTML file aa jayegi.
-6. Groups mein bot sirf commands aur links par reply karta hai.
+   - Agar kisi site se kuch chapters nahi aate, to bot **apne aap doosri site** (jismein wahi novel ho) se woh chapters le aata hai
+   - Kuch sites (jaise NovelFire) chapters ko doosri site par redirect karti hain, bot yeh redirect khud follow karta hai
+6. Har screen par **⬅️ Back** (results / novel / library par wapas) aur **🏠 Menu** button hai.
+7. Groups mein bot sirf commands aur links par reply karta hai.
 
 ---
 
@@ -464,7 +468,8 @@ Agar koi provider JVM par compile nahi hota, to use skip kar do:
 │       │   ├── Bot.kt          # Telegram update handling, commands, buttons, queue, reader
 │       │   ├── TelegramApi.kt  # Bot API client (retry, flood-wait handling, uploads)
 │       │   ├── Providers.kt    # parallel search, ranking, load cache, rate limits
-│       │   ├── Downloader.kt   # 2-pass chapter download + disk cache
+│       │   ├── Downloader.kt   # 3-pass chapter download (parallel → slow retry → mirror site) + disk cache
+│       │   ├── Mirrors.kt      # same novel on other sites dhoondhna + chapter matching
 │       │   ├── BookBuilder.kt  # EPUB3 / TXT / HTML builder, chapter cleaner, cover → JPEG
 │       │   ├── Store.kt        # users, library, history, stats → data/store.json
 │       │   ├── Ui.kt           # novel cards, progress bars, formatting
@@ -488,7 +493,8 @@ Agar koi provider JVM par compile nahi hota, to use skip kar do:
 | Build mein `OutOfMemoryError` / `Metaspace` | `gradle.properties` mein `-Xmx600m` ko `-Xmx1500m` karo, ya swap add karo (neeche dekho) |
 | `Unsupported class file major version` | Java 17+ chahiye: `java -version` check karo |
 | Kuch sites results nahi de rahi | `java -jar build/libs/quicknovel-bot.jar test` chalao. Cloudflare wali sites ke liye FlareSolverr lagao |
-| Chapters fail ho rahe hain / site block kar rahi hai | `CHAPTER_PARALLELISM=1` ya `2` karo |
+| Chapters fail ho rahe hain / site block kar rahi hai | `CHAPTER_PARALLELISM=1` ya `2` karo. Missing chapters bot doosri sites se laane ki koshish karta hai. `java -jar build/libs/quicknovel-bot.jar mirrors <novel-url>` se dekho kaunsi sites par wahi novel hai |
+| `Royal Road failed … 403 / error code: 1005` | Royal Road (Cloudflare) aapke server ke IP/ASN ko block kar raha hai (aksar datacenter/VPS IP). Bot ab app-API fail hone par website scraper try karta hai, lekin pura IP block ho to koi code fix nahi kar sakta: doosra VPS/residential IP use karo, ya wahi novel kisi doosri site se lo |
 | `409 Conflict: terminated by other getUpdates` | Bot do jagah chal raha hai. Ek instance band karo |
 | File 50 MB se badi hai | Yeh apne aap volumes mein split ho jaati hai. Ya local Bot API server lagake `MAX_UPLOAD_MB` badhao |
 

@@ -27,11 +27,28 @@ data class ProviderSearchResult(val api: MainAPI, val results: List<SearchRespon
  * (rate limiting, 10 min load cache, ad removal of chapter html).
  */
 object Providers {
-    val all: List<MainAPI> by lazy {
+    /** Every compiled provider, including the ones removed because they don't deliver novels */
+    val allIncludingRemoved: List<MainAPI> by lazy {
         val list = UpstreamProviders.enabled() +
                 (if (Config.includeDisabled) UpstreamProviders.disabled() else emptyList())
         list.distinctBy { it.name }.sortedBy { it.name.lowercase() }
     }
+
+    /**
+     * Sites that were tested and could not deliver a novel (search, novel page or chapters
+     * broken / blocked). Listed in resources/removed_providers.txt (found with
+     * `quicknovel-bot check`), plus REMOVED_PROVIDERS from .env. KEEP_PROVIDERS brings one back.
+     */
+    val removed: Set<String> by lazy {
+        val fromFile = Providers::class.java.getResourceAsStream("/removed_providers.txt")?.bufferedReader()?.readLines().orEmpty()
+            .map { it.substringBefore('#').trim() }.filter { it.isNotEmpty() }
+        val fromEnv = Config.env("REMOVED_PROVIDERS")?.split(',')?.map { it.trim() }?.filter { it.isNotEmpty() }.orEmpty()
+        val keep = Config.env("KEEP_PROVIDERS")?.split(',')?.map { it.trim().lowercase() }?.toSet().orEmpty()
+        (fromFile + fromEnv).filter { it.lowercase() !in keep }.map { it.lowercase() }.toSet()
+    }
+
+    /** Working providers only */
+    val all: List<MainAPI> by lazy { allIncludingRemoved.filter { it.name.lowercase() !in removed } }
 
     /** Providers that are only used for direct links (Reddit) */
     private val special: List<MainAPI> by lazy { UpstreamProviders.special() }
@@ -279,6 +296,38 @@ object Providers {
             }
         }
         throw firstError ?: ErrorLoadingException("No data")
+    }
+
+    // ------------------------------------------------------------------ full check
+
+    /**
+     * Tests whether a site really delivers novels: search (or main page) -> load novel -> one
+     * chapter with text. Returns null when everything works, otherwise the step that failed.
+     */
+    suspend fun check(api: MainAPI, query: String = "the"): String? {
+        val list = try {
+            val s = withTimeoutOrNull(40_000L) { runCatching { withFallback(api) { it.search(query) } }.getOrNull() }.orEmpty()
+            s.ifEmpty {
+                if (api.hasMainPage) withTimeoutOrNull(40_000L) { runCatching { mainPage(api, 1).list }.getOrNull() }.orEmpty() else emptyList()
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (t: Throwable) { return "search: ${friendlyError(t)}" }
+        if (list.isEmpty()) return "search: no results"
+        var lastError = "load: failed"
+        for (s in list.take(3)) {
+            try {
+                val r = withTimeoutOrNull(60_000L) { load(api, s.url, allowCache = false) } ?: run { lastError = "load: timeout"; null } ?: continue
+                if (r is com.lagradost.quicknovel.EpubResponse) return null // downloadable epub site
+                val ch = (r as? com.lagradost.quicknovel.StreamResponse)?.data
+                if (ch.isNullOrEmpty()) { lastError = "load: no chapters"; continue }
+                val html = withTimeoutOrNull(60_000L) { runCatching { loadChapter(api, ch.first().url) }.getOrNull() }
+                val text = html?.let { Jsoup.parse(it).text() }.orEmpty()
+                if (text.length >= 200) return null
+                lastError = "chapter: empty"
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (t: Throwable) {
+                lastError = "load: ${friendlyError(t)}"
+            }
+        }
+        return lastError
     }
 
     // ------------------------------------------------------------------ health

@@ -65,6 +65,9 @@ class Bot(private val tg: TelegramApi) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<String>>?) = size > 60
     }
 
+    /** Finds and sends new novels by itself (see AutoSender) */
+    private val auto = AutoSender(tg) { botUsername }
+
     // ------------------------------------------------------------------ main loop
 
     suspend fun run() {
@@ -107,6 +110,7 @@ class Bot(private val tg: TelegramApi) {
             }
         }
         Runtime.getRuntime().addShutdownHook(Thread { Store.save(force = true) })
+        scope.launch { auto.loop() } // automatic novel delivery, no permission needed
 
         var offset = 0L
         while (true) {
@@ -235,6 +239,7 @@ class Bot(private val tg: TelegramApi) {
                 tg.sendMessage(chatId, "🧹 Deleted $n cached chapters (${Ui.size(b)}) older than $days days.")
             }
             "testproviders" -> if (isAdmin(userId)) testProviders(chatId, arg.ifBlank { "the" })
+            "auto" -> if (isAdmin(userId)) autoCommand(chatId, arg.lowercase())
             else -> tg.sendMessage(chatId, "Unknown command. See /help")
         }
     }
@@ -674,12 +679,8 @@ Current format: <b>${BookFormat.of(user.settings.format).label}</b> · change it
         }
     }
 
-    private fun fileName(title: String, a: Int, b: Int, total: Int, ext: String, part: Int? = null): String {
-        val clean = title.replace(Regex("[\\\\/:*?\"<>|\\p{Cntrl}]"), "").replace(Regex("\\s+"), " ").trim().take(80).ifBlank { "novel" }
-        val range = if (a == 1 && b == total) "" else " (Ch $a-$b)"
-        val p = part?.let { " - Vol ${"%02d".format(it)}" } ?: ""
-        return "$clean$range$p.$ext"
-    }
+    private fun fileName(title: String, a: Int, b: Int, total: Int, ext: String, part: Int? = null) =
+        BookBuilder.fileName(title, a, b, total, ext, part)
 
     private suspend fun runDownload(job: DlJob, nref: NovelRef, format: BookFormat, from: Int, to: Int) {
         val chatId = job.chatId
@@ -715,19 +716,7 @@ Current format: <b>${BookFormat.of(user.settings.format).label}</b> · change it
         val thumb = coverRaw?.let { BookBuilder.toJpeg(it, 320, 190_000) }
 
         // build, split into volumes when larger than the upload limit
-        var parts = 1
-        var files: List<Pair<String, ByteArray>>
-        while (true) {
-            val chunks = if (parts == 1) listOf(chapters) else chapters.chunked((chapters.size + parts - 1) / parts)
-            files = chunks.mapIndexed { i, chs ->
-                val f = chs.first().index + 1; val l = chs.last().index + 1
-                val m = if (parts == 1) meta else meta.copy(title = "${meta.title} (Vol ${i + 1}: Ch $f-$l)")
-                fileName(r.name, f, l, if (parts == 1) data.size else -1, format.ext, if (parts == 1) null else i + 1) to BookBuilder.build(format, m, chs)
-            }
-            val biggest = files.maxOf { it.second.size }
-            if (biggest <= Config.maxUploadBytes || parts >= chapters.size) break
-            parts = maxOf(parts + 1, (parts * biggest.toDouble() / Config.maxUploadBytes * 1.1).toInt() + 1)
-        }
+        val files = BookBuilder.buildVolumes(format, meta, chapters, Config.maxUploadBytes, r.name, data.size)
 
         files.forEachIndexed { i, (name, bytes) ->
             tg.editMessage(chatId, job.messageId, "📤 <b>${h(job.title)}</b>\nUploading" + (if (files.size > 1) " volume ${i + 1}/${files.size}" else "") + " (${Ui.size(bytes.size.toLong())})…")
@@ -915,6 +904,26 @@ Current format: <b>${BookFormat.of(user.settings.format).label}</b> · change it
         val text = sb.toString()
         if (text.length < 4000) tg.editMessage(chatId, msg, text)
         else { tg.deleteMessage(chatId, msg); text.chunked(3900).forEach { tg.sendMessage(chatId, it.replace(Regex("<[^>]*$"), "")) } }
+    }
+
+    private suspend fun autoCommand(chatId: Long, arg: String) {
+        when (arg) {
+            "on" -> { auto.setEnabled(true); tg.sendMessage(chatId, "🤖 Auto send <b>ON</b> — new novels will be sent automatically.") }
+            "off" -> { auto.setEnabled(false); tg.sendMessage(chatId, "⏸ Auto send <b>OFF</b>.") }
+            "now" -> { auto.runNow(); tg.sendMessage(chatId, "▶️ Looking for a new novel right now…") }
+            else -> {
+                val fmt = java.text.SimpleDateFormat("dd MMM HH:mm")
+                val recent = auto.recent(10).joinToString("\n") { "• ${h(Ui.cut(it.title, 60))} <i>(${h(it.api)}, ${it.chapters} ch)</i>" }
+                tg.sendMessage(chatId, """🤖 <b>Auto send</b>: ${if (auto.enabled) "✅ ON" else "⏸ OFF"}
+📤 To: ${auto.targets.joinToString { "<code>$it</code>" }.ifEmpty { "nobody (set AUTO_CHAT_IDS or ADMIN_IDS)" }}
+⏱ Every ${Config.autoIntervalMin} min · ${Config.autoNovelsPerRun} novel(s) per run · max ${if (Config.autoMaxChapters == 0) "all" else Config.autoMaxChapters} chapters
+📚 Already sent: ${auto.count} (never sent twice)
+""" + (auto.running?.let { "⚙️ Now: <i>${h(it)}</i>\n" } ?: "") +
+                        (if (auto.nextRun > 0) "🕒 Next run: ${fmt.format(java.util.Date(auto.nextRun))}\n" else "") +
+                        (if (recent.isNotEmpty()) "\n<b>Last sent</b>\n$recent\n" else "") +
+                        "\n<code>/auto on</code> · <code>/auto off</code> · <code>/auto now</code>")
+            }
+        }
     }
 
     private suspend fun expired(chatId: Long) {

@@ -1,7 +1,14 @@
 package com.lagradost.quicknovel.bot
 
 import com.lagradost.quicknovel.StreamResponse
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import kotlin.system.exitProcess
 
@@ -17,6 +24,8 @@ Usage:
   quicknovel-bot info <url>              load a novel page
   quicknovel-bot download <url> [from] [to] [epub|txt|html]   build a book into ./out
   quicknovel-bot test [query]            search test for every provider
+  quicknovel-bot check [query]           full test per site (search, novel, 1 chapter)
+  quicknovel-bot auto-test               run the auto sender once (book -> ./out, no Telegram)
   quicknovel-bot mirrors <url>           other sites that have the same novel (used for failed chapters)
         """.trimIndent()
     )
@@ -59,6 +68,38 @@ fun main(args: Array<String>) {
             Providers.searchAll(q, Providers.all).sortedBy { it.api.name }.forEach {
                 println("%-28s %4d  %5.1fs  %s".format(it.api.name, it.results.size, it.millis / 1000.0, it.error ?: ""))
             }
+        }
+        "check" -> runBlocking {
+            // full health check per site: search -> load novel -> download one chapter
+            val q = args.drop(1).joinToString(" ").ifBlank { "the" }
+            val sem = Semaphore(4)
+            val res = coroutineScope {
+                Providers.allIncludingRemoved.map { api ->
+                    async(Dispatchers.IO) {
+                        sem.withPermit {
+                            val err: String? = withTimeoutOrNull(240_000L) { Providers.check(api, q) ?: "OK" }.let { if (it == null) "timeout" else if (it == "OK") null else it }
+                            println("%-28s %s".format(api.name, err ?: "OK")); System.out.flush()
+                            api.name to err
+                        }
+                    }
+                }.awaitAll()
+            }
+            println("\nWORKING (${res.count { it.second == null }}): " + res.filter { it.second == null }.joinToString(", ") { it.first })
+            println("BROKEN  (${res.count { it.second != null }}):")
+            res.filter { it.second != null }.forEach { println("${it.first}   # ${it.second}") }
+        }
+        "auto-test" -> runBlocking {
+            // runs the auto sender once without Telegram: the book is written to ./out and the
+            // novel is remembered in data/sent.json (run it again -> a different novel)
+            val out = File("out").apply { mkdirs() }
+            val auto = AutoSender({ _, name, bytes, caption, _, _ ->
+                out.resolve(name).writeBytes(bytes)
+                println("SENT  ${name} (${Ui.size(bytes.size.toLong())})\n      ${caption.replace(Regex("<[^>]+>"), "").replace("\n", "\n      ")}")
+            }, { "bot" }, targetOverride = setOf(0L))
+            auto.load()
+            println("already sent: ${auto.count}")
+            println(if (auto.sendOne()) "OK - novel sent" else "no new novel found")
+            Store.save(force = true)
         }
         "mirrors" -> runBlocking {
             val url = args.getOrNull(1) ?: return@runBlocking usage()

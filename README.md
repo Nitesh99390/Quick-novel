@@ -1,7 +1,20 @@
 # 📚 QuickNovel Telegram Bot
 
-Ek Telegram bot jo **35 chalti hui web-novel websites** par ek saath search karta hai aur kisi bhi novel ko
-saaf-suthri **EPUB / TXT / HTML** book bana ke Telegram par hi bhej deta hai.
+Ek **private** Telegram bot (sirf Admin use kar sakta hai) jo sirf **9 chuni hui web-novel websites** se novels
+**24/7 apne aap poore scrape** karta hai, unki saaf-suthri **EPUB / TXT / HTML** book banata hai aur aapke
+**dump channel** mein bhej deta hai. Ek novel khatam → turant agla novel. Koi novel dobara nahi aata.
+
+| Website | Bot mein naam |
+|---|---|
+| https://freewebnovel.com/ | FreeWebNovel |
+| https://novelping.com/ | NovelBin |
+| https://mtlnovel.me/ | MtlNovel |
+| https://novelfull.com/ | NovelFull |
+| https://www.royalroad.com/ | Royal Road |
+| https://www.wuxiaworld.com/ | WuxiaWorld |
+| https://wuxia.click/ | WuxiaClick |
+| https://www.scribblehub.com/ | Scribblehub |
+| https://readnovelfull.com/ | ReadNovelFull |
 
 Ismein [QuickNovel](https://github.com/LagradOst/QuickNovel) Android app ka **original provider (scraper) code**
 use hota hai, bina kisi badlaav ke. Woh code JVM par chhote "Android shims" ki madad se compile hota hai.
@@ -32,13 +45,18 @@ Isliye jab upstream mein nayi sites ya fixes aate hain, to bas ek `git submodule
 
 ## ✨ Features
 
-- 🤖 **Auto Send (naya)**: bot **khud se** sites ki popular/latest list se naye novels dhoondhta hai, book banata hai aur
-  aapko Telegram par bhejta rehta hai. Aapki permission ya koi button dabane ki zarurat nahi.
+- 🔒 **Sirf Admin**: bot sirf `ADMIN_IDS` wale users ki baat sunta hai. Koi aur user bot use nahi kar sakta
+  (unko sirf "private bot" ka jawab milta hai, groups mein kuch nahi). `ADMIN_ONLY=false` se purana behaviour wapas.
+- 🌐 **Sirf 9 sites**: upar wali 9 websites hi search, browse, links, mirrors aur auto scrape mein use hoti hain.
+  Baaki saari sites hata di gayi hain (`SITES=` se badal sakte ho).
+- 🤖 **24/7 Auto Scraper**: bot **khud se** sites ki popular / latest / completed lists se novel chunta hai,
+  **poora novel** (saare chapters) scrape karta hai, book banata hai aur **dump channel** mein cover + info ke saath bhejta hai.
+  Bhejte hi **turant agla novel** shuru. Yeh bina ruke chalta rehta hai.
   - Jo novel ek baar bhej diya, woh `data/sent.json` mein save hota hai aur **dobara kabhi scrape ya send nahi hota**
     (site+link aur novel ke naam dono se check hota hai, isliye doosri site par wahi novel ho to bhi skip hota hai)
-  - Jo novel download nahi ho pata, use 3 baar ke baad chhod deta hai
-  - Details: [🤖 Auto Send](#-auto-send-khud-se-novel-bhejna)
-- 🧹 **Kharab sites hata di gayi**: jo 23 sites novel nahi de rahi thi, woh search, browse aur auto send se hata di gayi hain
+  - Bot restart / crash ho jaaye to **wahi novel wahin se continue** hota hai (download hue chapters disk cache se aate hain)
+  - Har site ki list mein position yaad rehti hai, isliye har baar shuru ke pages dobara scan nahi hote
+  - Details: [🤖 Auto Scraper](#-auto-scraper-247)
 - 🔍 **Parallel search**: saari sites par ek saath search, live progress ke saath, aur results smart ranking se sort hote hain
 - 🔗 **Link paste karo**: kisi supported site ka link bhejo, novel seedha khul jayega
 - 🧭 **Browse**: har site ke popular / latest novels dekho (paging ke saath)
@@ -368,7 +386,19 @@ Saare options [`.env.example`](.env.example) mein hain. Pehle environment variab
 |---|---|---|
 | `BOT_TOKEN` | – | **Zaroori.** @BotFather se mila token |
 | `ADMIN_IDS` | – | Admin user ids, comma se alag (`/id` se pata karo) |
-| `ALLOWED_USERS` | sab log | Sirf in user ids ko bot use karne do. Khaali chhodo to sab use kar sakte hain |
+| `ADMIN_ONLY` | `true` | `true` = sirf `ADMIN_IDS` bot use kar sakte hain (private bot). `false` = `ALLOWED_USERS` / sab log |
+| `ALLOWED_USERS` | – | Sirf `ADMIN_ONLY=false` ke saath: in user ids ko bhi bot use karne do (khaali = sab) |
+| `SITES` | 9 sites | Kaunsi sites use hon (provider naam, comma se). Khaali = upar wali 9, `all` = saari working sites |
+| `DUMP_CHANNEL_ID` | – | Auto scraper ke novels is channel mein jaate hain (`-100…`, bot admin hona chahiye). Khaali = `ADMIN_IDS` |
+| `AUTO_SEND` | `true` | 24/7 auto scraper chalu / band |
+| `AUTO_DELAY_SEC` | `5` | Ek novel bhejne ke baad agla novel kitne second mein shuru ho |
+| `AUTO_IDLE_MIN` | `15` | Koi naya novel na mile to kitne minute ruke |
+| `AUTO_MAX_CHAPTERS` | `0` | `0` = poora novel. Koi number = utne hi chapters |
+| `AUTO_MIN_CHAPTERS` / `AUTO_SKIP_ABOVE` | `5` / `0` | Isse kam / zyada chapters wale novels skip (`0` = koi upper limit nahi) |
+| `AUTO_MAX_FAILED_PERCENT` | `10` | Isse zyada % chapters fail hon to book nahi bhejte |
+| `AUTO_FORMAT` | `EPUB` | `EPUB`, `TXT` ya `HTML` |
+| `AUTO_SITES` | – | Auto scrape sirf in sites se (khaali = `SITES` ki saari) |
+| `AUTO_MAX_PAGES` | `100` | Har site ki har list mein kitne pages tak naya novel dhoondhe |
 | `MAX_CONCURRENT_DOWNLOADS` | `2` | Sab users ko milake ek saath kitni books banengi |
 | `CHAPTER_PARALLELISM` | `3` | Ek book ke liye kitne chapters parallel aayenge (zyada rakhoge to site block kar sakti hai) |
 | `MAX_CHAPTERS` | `3000` | Normal user ek download mein max kitne chapters le sakta hai (`0` = unlimited, admin par limit nahi) |
@@ -386,7 +416,7 @@ Example `.env`:
 ```env
 BOT_TOKEN=123456789:AAxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ADMIN_IDS=987654321
-ALLOWED_USERS=
+DUMP_CHANNEL_ID=-1001234567890
 CHAPTER_PARALLELISM=3
 FLARESOLVERR_URL=http://localhost:8191/v1
 ```
@@ -410,18 +440,23 @@ FLARESOLVERR_URL=http://localhost:8191/v1
 | `/id` | Aapki Telegram user id |
 | `/help` | Madad |
 
-**Admin commands** (sirf `ADMIN_IDS` wale users ke liye):
+> 🔒 Default mein bot **private** hai: upar wale saare commands bhi sirf `ADMIN_IDS` use kar sakte hain.
+
+**Admin commands**:
 
 | Command | Kaam |
 |---|---|
-| `/stats` | Users, searches, downloads, cache ka size |
+| `/auto` | Auto scraper ka status: on/off, dump channel, abhi kaunsa novel scrape ho raha hai (chapters x/y), kitne bhej chuka |
+| `/auto on` / `/auto off` | Auto scraper chalu / band (restart ke baad bhi yaad rehta hai; band karne par current novel baad mein wahin se continue hota hai) |
+| `/skip` (ya `/auto skip`) | Abhi wala novel chhod do. Woh kabhi dobara scrape nahi hoga, agla novel turant shuru |
+| `/auto now` | Wait chhod ke turant agla novel shuru karo |
+| `/auto sent` | Aakhri 30 bheje gaye novels |
+| `/auto forget <naam ya url>` | Novel ko "sent" list se hatao, taaki woh dobara scrape ho sake |
+| `/stats` | Users, downloads, cache ka size, memory |
 | `/broadcast [msg]` | Sab users ko message bhejo (HTML allowed) |
-| `/ban <id>` / `/unban <id>` | User ko block / unblock karo |
+| `/ban <id>` / `/unban <id>` | User ko block / unblock karo (sirf `ADMIN_ONLY=false` mein kaam ka) |
 | `/cleancache [days]` | Itne din se purane cached chapters delete karo |
-| `/testproviders [query]` | Saari sites ka health check |
-| `/auto` | Auto send ka status: on/off, kitne novels bhej chuka, aakhri 10 novels, agla run kab |
-| `/auto on` / `/auto off` | Auto send chalu / band karo (restart ke baad bhi yaad rehta hai) |
-| `/auto now` | Abhi turant ek naya novel dhoondh ke bhejo |
+| `/testproviders [query]` | Saari 9 sites ka search test |
 
 ---
 
@@ -496,47 +531,75 @@ Agar koi provider JVM par compile nahi hota, to use skip kar do:
 
 ---
 
-## 🤖 Auto Send (khud se novel bhejna)
+## 🤖 Auto Scraper (24/7)
 
-Bot start hote hi ek background kaam chalta hai jo **bina aapse pooche** naye novels bhejta rehta hai:
+Bot start hote hi ek background kaam chalta hai jo **bina aapse pooche, bina ruke** novels scrape karke bhejta rehta hai:
 
-1. Har `AUTO_INTERVAL_MIN` minute (default 30) mein bot ek-ek karke working sites ki **popular / latest list** dekhta hai.
-2. List mein pehla aisa novel chunta hai jo **pehle kabhi nahi bheja gaya**. Bheje hue novels bina load kiye hi skip ho jaate hain.
-3. Novel ke chapters download karta hai (default pehle 500, `AUTO_MAX_CHAPTERS`), EPUB banata hai, aur cover ke saath bhejta hai.
-4. Novel `data/sent.json` mein likh diya jaata hai. Restart ke baad bhi yaad rehta hai, isliye **wahi novel dobara nahi aayega**.
-   Check site+link se bhi hota hai aur naam se bhi, isliye agar wahi novel doosri site par bhi hai to bhi skip ho jayega.
-5. Agar 10% se zyada chapters fail ho jaayein, to adhoori book nahi bhejta. 3 baar fail hone ke baad woh novel chhod deta hai.
-
-**Kisko bhejta hai?** `AUTO_CHAT_IDS` mein jo ids hain unko. Agar yeh khaali hai to `ADMIN_IDS` ko.
-Channel ya group mein bhejne ke liye bot ko wahan admin banao aur uski id (`-100…`) `AUTO_CHAT_IDS` mein daalo.
-
-```env
-ADMIN_IDS=987654321
-AUTO_SEND=true
-AUTO_CHAT_IDS=987654321,-1001234567890   # aap + ek channel
-AUTO_INTERVAL_MIN=30
-AUTO_NOVELS_PER_RUN=1
-AUTO_MAX_CHAPTERS=500                     # 0 = saare chapters
-AUTO_LANGUAGES=en
-AUTO_SITES=                               # khaali = saari working sites, ya: NovelBin,FreeWebNovel,LibRead
+```
+ ┌─────────────────────────────────────────────────────────────────────┐
+ │ 1. agli site (round robin: FreeWebNovel → MtlNovel → NovelBin → …)   │
+ │ 2. uski list (Popular / Latest / Completed …) mein pehla aisa novel  │
+ │    jo kabhi nahi bheja  (sent.json: site+url  aur  naam dono check)  │
+ │ 3. POORA novel scrape (saare chapters, parallel + retry + mirror)    │
+ │ 4. EPUB banao (50 MB se bada → Vol 1, Vol 2 …)                       │
+ │ 5. Dump channel: cover + info, phir book file(s)                     │
+ │ 6. sent.json mein save  →  AUTO_DELAY_SEC (5s) baad wapas step 1     │
+ └─────────────────────────────────────────────────────────────────────┘
 ```
 
-Telegram se control: `/auto` (status), `/auto off`, `/auto on`, `/auto now`.
+- **Duplicate kabhi nahi**: har bheja hua novel `data/sent.json` mein jaata hai. List mein dikhne wale novels ko load
+  karne se pehle hi check kiya jaata hai, aur novel page load hone ke baad asli naam se dobara check hota hai.
+  Wahi novel doosri site par ho (jaise NovelBin aur FreeWebNovel dono par "Shadow Slave") to bhi skip.
+- **Restart safe**: abhi wala novel `sent.json` mein `current` ke naam se save hota hai. Bot band/crash ho jaaye to
+  start hote hi wahi novel continue hota hai. Jo chapters aa chuke the woh disk cache se aate hain (dobara download nahi).
+- **Adhoori book nahi**: `AUTO_MAX_FAILED_PERCENT` (10%) se zyada chapters fail hon to book nahi bhejta, admin ko message
+  aata hai. 3 baar fail hone ke baad novel chhod deta hai.
+- **Kuch naya na mile** to `AUTO_IDLE_MIN` (15) minute rukta hai aur lists shuru se dekhta hai (naye releases ke liye).
+- Dump channel mein bhejne mein problem ho (bot admin nahi hai) to admin ko message aata hai aur novel baad mein phir try hota hai.
+
+**Setup**
+
+1. Ek Telegram channel banao (dump channel), bot ko us channel ka **admin** banao (post karne ki permission ke saath).
+2. Channel ki id nikalo: channel ka koi post [@userinfobot](https://t.me/userinfobot) ya @RawDataBot ko forward karo,
+   id `-100…` jaisi hogi.
+3. `.env` mein:
+
+```env
+BOT_TOKEN=123456789:AA...
+ADMIN_IDS=987654321                 # sirf yeh user bot use kar sakta hai
+DUMP_CHANNEL_ID=-1001234567890      # yahan novels jayenge
+AUTO_SEND=true
+AUTO_DELAY_SEC=5                    # ek novel ke baad agla kitne second mein
+AUTO_MAX_CHAPTERS=0                 # 0 = poora novel
+AUTO_SKIP_ABOVE=0                   # jaise 3000 = isse lambe novels skip
+AUTO_FORMAT=EPUB
+AUTO_SITES=                         # khaali = saari 9 sites, ya: NovelBin,FreeWebNovel
+```
+
+Telegram se control: `/auto`, `/auto off`, `/auto on`, `/skip`, `/auto now`, `/auto sent`, `/auto forget <naam>`.
 Sab kuch dobara shuru se bhejna ho to bot band karke `data/sent.json` delete kar do.
 
-### Hatayi gayi sites
+Bina Telegram ke test: `java -jar build/libs/quicknovel-bot.jar auto-test` (book `./out` mein, novel sent.json mein
+yaad rehta hai, dobara chalao to doosra novel aata hai). `... mainpages` dikhata hai ki har site ki lists mein kya aa raha hai.
 
-`java -jar build/libs/quicknovel-bot.jar check` se har site ka poora test kiya gaya (search → novel → chapter ka text).
-Jo **23 sites** do alag tests mein fail hui, woh [`src/main/resources/removed_providers.txt`](src/main/resources/removed_providers.txt)
-mein hain aur bot unhe use nahi karta: AllNovel, Annas Archive, Chikari, Chrysanthemum Garden, FanMTL, FenrirRealm,
-Galaxy Novels, Graycity, KolNovel, Light Novel Translations, MeioNovel, Nova, NovelFull-Net, NovLove, RanobeHub, Ranobes,
-Ranovel, Royal Road, SakuraNovel, Scribblehub, Wattpad, WTR-LAB, WuxiaBox.
+### Sites ka status (test: 2026-10-31)
 
-Agar baad mein koi site theek ho jaaye, to bina rebuild ke `.env` mein `KEEP_PROVIDERS=Royal Road,Wattpad` likh do.
-Aur koi site hatani ho to `REMOVED_PROVIDERS=Name1,Name2`.
+`java -jar build/libs/quicknovel-bot.jar check` (search → novel → chapter) aur `mainpages`:
 
-> Note: kuch sites (jaise Royal Road, Scribblehub) Cloudflare se datacenter IP ko block karti hain. Aapke server par
-> `FLARESOLVERR_URL` ke saath chal sakti hain. Tab unhe `KEEP_PROVIDERS` se wapas la sakte ho.
+| Site | Search / link | Auto scrape list | Note |
+|---|---|---|---|
+| FreeWebNovel | ✅ | ✅ 3 lists | |
+| NovelBin (novelping.com) | ✅ | ✅ 6 lists | |
+| MtlNovel | ✅ | ✅ | |
+| NovelFull | ✅ | ✅ 5 lists | |
+| WuxiaWorld | ✅ | ✅ 6 lists | |
+| WuxiaClick | ✅ | ✅ 5 lists | |
+| ReadNovelFull | ✅ | ➖ | Site ki koi popular list nahi hai (upstream provider), isliye sirf search / link aur missing chapters ke mirror ke liye |
+| Royal Road | ⚠️ | ⚠️ | Datacenter IP par Cloudflare 403 deta hai. Apne server par `FLARESOLVERR_URL` ke saath chalao |
+| Scribblehub | ⚠️ | ⚠️ | Wahi, Cloudflare 403 |
+
+Jo site block ho, auto scraper usse chup-chaap skip karke baaki sites se novels laata rehta hai, aur baad mein phir try karta hai.
+Sites ki list badalni ho: `SITES=NovelBin,FreeWebNovel,...` (provider ke naam), ya `SITES=all` = saari working QuickNovel sites.
 
 ---
 
@@ -548,7 +611,8 @@ Aur koi site hatani ho to `REMOVED_PROVIDERS=Name1,Name2`.
 | `MainAPI.kt` not found / `upstream/QuickNovel` khaali hai | `git submodule update --init --depth 1` |
 | Build mein `OutOfMemoryError` / `Metaspace` | `gradle.properties` mein `-Xmx600m` ko `-Xmx1500m` karo, ya swap add karo (neeche dekho) |
 | `Unsupported class file major version` | Java 17+ chahiye: `java -version` check karo |
-| Auto send kuch nahi bhej raha | `/auto` se status dekho. `ADMIN_IDS` ya `AUTO_CHAT_IDS` set hona chahiye, aur aapne bot ko pehle `/start` bheja ho. Channel ke liye bot admin hona chahiye |
+| Auto scraper kuch nahi bhej raha | `/auto` se status dekho. `DUMP_CHANNEL_ID` (ya `ADMIN_IDS`) set hona chahiye, bot channel ka admin hona chahiye, aur admin ne bot ko pehle `/start` bheja ho |
+| Bot "private bot" bolta hai | Aapki id `ADMIN_IDS` mein nahi hai. `/id` se id dekho aur `.env` mein daalo |
 | Kuch sites results nahi de rahi | `java -jar build/libs/quicknovel-bot.jar check` chalao. Cloudflare wali sites ke liye FlareSolverr lagao |
 | Chapters fail ho rahe hain / site block kar rahi hai | `CHAPTER_PARALLELISM=1` ya `2` karo. Missing chapters bot doosri sites se laane ki koshish karta hai. `java -jar build/libs/quicknovel-bot.jar mirrors <novel-url>` se dekho kaunsi sites par wahi novel hai |
 | `Royal Road failed … 403 / error code: 1005` | Royal Road (Cloudflare) aapke server ke IP/ASN ko block kar raha hai (aksar datacenter/VPS IP). Bot ab app-API fail hone par website scraper try karta hai, lekin pura IP block ho to koi code fix nahi kar sakta: doosra VPS/residential IP use karo, ya wahi novel kisi doosri site se lo |

@@ -76,7 +76,14 @@ object Downloader {
         val done = AtomicInteger(0)
         val failed = AtomicInteger(0)
         val cached = chapters.count { isCached(api, it.second.url) }
+        // cleaned chapter bodies only (raw pages are 3-10x bigger) - keeps whole novels with
+        // thousands of chapters inside a small heap
         val html = arrayOfNulls<String>(chapters.size)
+        fun titleOf(i: Int) = chapters[i].second.name.ifBlank { "Chapter ${chapters[i].first + 1}" }
+        suspend fun cleaned(i: Int, raw: String?): String? = raw?.let {
+            withContext(Dispatchers.Default) { runCatching { ChapterCleaner.clean(titleOf(i), it, stripAuthorNotes) }.getOrNull() }
+                ?: "<p>(chapter could not be parsed)</p>"
+        }
         var lastReport = 0L
         val reportLock = kotlinx.coroutines.sync.Mutex()
 
@@ -104,7 +111,7 @@ object Downloader {
                 sem.withPermit {
                     // back off when the site starts refusing requests
                     if (consecutiveFails.get() >= parallel) delay(minOf(8000L, 1500L * consecutiveFails.get()))
-                    html[i] = chapterHtml(api, data, maxTries = 2)
+                    html[i] = cleaned(i, chapterHtml(api, data, maxTries = 2))
                     if (html[i] == null) { failed.incrementAndGet(); consecutiveFails.incrementAndGet() } else consecutiveFails.set(0)
                     done.incrementAndGet()
                     report()
@@ -121,7 +128,7 @@ object Downloader {
             delay(4000)
             for ((n, i) in retry.withIndex()) {
                 ensureActive()
-                html[i] = chapterHtml(api, chapters[i].second, maxTries = 3)
+                html[i] = cleaned(i, chapterHtml(api, chapters[i].second, maxTries = 3))
                 if (html[i] != null) failed.decrementAndGet()
                 report(force = n == retry.lastIndex)
                 delay(1200L + api.rateLimitTime)
@@ -149,7 +156,7 @@ object Downloader {
                             val (index, data) = chapters[i]
                             val target = Mirrors.match(mirror, index, data, total) ?: return@withPermit
                             val page = chapterHtml(mirror.api, target, maxTries = 2)
-                            if (page != null) { html[i] = page; failed.decrementAndGet() } else mirrorFails++
+                            if (page != null) { html[i] = cleaned(i, page); failed.decrementAndGet() } else mirrorFails++
                             report()
                         }
                     }
@@ -160,15 +167,10 @@ object Downloader {
         report(force = true)
 
         val results = chapters.mapIndexed { i, (index, data) ->
-            val title = data.name.ifBlank { "Chapter ${index + 1}" }
-            val raw = html[i]
-            val body = if (raw != null) {
-                withContext(Dispatchers.Default) { runCatching { ChapterCleaner.clean(title, raw, stripAuthorNotes) }.getOrNull() }
-                    ?: "<p>(chapter could not be parsed)</p>"
-            } else {
-                "<p><i>This chapter could not be downloaded.</i></p><p>${org.jsoup.nodes.Entities.escape(data.url)}</p>"
-            }
-            Chapter(index, title, body)
+            val body = html[i]
+                ?: "<p><i>This chapter could not be downloaded.</i></p><p>${org.jsoup.nodes.Entities.escape(data.url)}</p>"
+            html[i] = null
+            Chapter(index, titleOf(i), body)
         }
         results to failed.get()
     }

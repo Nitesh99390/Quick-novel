@@ -47,8 +47,43 @@ object Providers {
         (fromFile + fromEnv).filter { it.lowercase() !in keep }.map { it.lowercase() }.toSet()
     }
 
-    /** Working providers only */
-    val all: List<MainAPI> by lazy { allIncludingRemoved.filter { it.name.lowercase() !in removed } }
+    /**
+     * The only sites this bot uses (search, browse, links, mirrors and auto scrape).
+     * Provider names of the upstream QuickNovel providers:
+     *   freewebnovel.com, novelping.com (NovelBin), mtlnovel.me, novelfull.com, royalroad.com,
+     *   wuxiaworld.com, wuxia.click, scribblehub.com, readnovelfull.com
+     * Can be changed with SITES=Name1,Name2 in .env (SITES=all = every working site).
+     */
+    val DEFAULT_SITES = listOf(
+        "FreeWebNovel", "NovelBin", "MtlNovel", "NovelFull", "Royal Road",
+        "WuxiaWorld", "WuxiaClick", "Scribblehub", "ReadNovelFull",
+    )
+
+    /** null = no allowlist (every working site) */
+    val allowedSites: Set<String>? by lazy {
+        val env = Config.env("SITES")
+        when {
+            env.equals("all", true) -> null
+            env != null -> env.split(',', ';').map { it.trim().lowercase() }.filter { it.isNotEmpty() }.toSet()
+            else -> DEFAULT_SITES.map { it.lowercase() }.toSet()
+        }
+    }
+
+    /**
+     * Usable providers. With the site allowlist (default) exactly the listed sites are used -
+     * even when they are in removed_providers.txt (the list is the admin's explicit choice).
+     */
+    val all: List<MainAPI> by lazy {
+        val allow = allowedSites
+        val list = if (allow != null) {
+            val pool = (allIncludingRemoved + UpstreamProviders.disabled()).distinctBy { it.name }
+            pool.filter { it.name.lowercase() in allow }.also { found ->
+                val missing = allow - found.map { it.name.lowercase() }.toSet()
+                if (missing.isNotEmpty()) Logger.warn("SITES: unknown provider name(s): ${missing.joinToString()}")
+            }
+        } else allIncludingRemoved.filter { it.name.lowercase() !in removed }
+        list.sortedBy { it.name.lowercase() }
+    }
 
     /** Providers that are only used for direct links (Reddit) */
     private val special: List<MainAPI> by lazy { UpstreamProviders.special() }

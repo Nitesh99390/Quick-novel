@@ -56,19 +56,19 @@ private data class SentFile(
  */
 class AutoSender(
     /** (chat, file name, bytes, caption, mime, thumbnail) -> sends one document */
-    private val sendDocument: suspend (Long, String, ByteArray, String, String, ByteArray?) -> TgFile?,
+    private val sendDocument: suspend (Long, String, ByteArray, String, String, ByteArray?) -> Unit,
     private val botName: () -> String,
     /** overrides DUMP_CHANNEL_ID / AUTO_CHAT_IDS / ADMIN_IDS (used by the CLI test) */
     private val targetOverride: Set<Long>? = null,
     /** (chat, cover, caption) -> sends the cover + novel info before the files (optional) */
-    private val sendPhoto: (suspend (Long, ByteArray, String) -> TgFile?)? = null,
+    private val sendPhoto: (suspend (Long, ByteArray, String) -> Unit)? = null,
     /** status messages for the admins (optional) */
     private val notifyAdmins: (suspend (String) -> Unit)? = null,
 ) {
     constructor(tg: TelegramApi, botName: () -> String) : this(
-        sendDocument = { chat, name, bytes, caption, mime, thumb -> tg.sendDocumentFile(chat, name, bytes, caption, mime, thumb) },
+        sendDocument = { chat, name, bytes, caption, mime, thumb -> tg.sendDocument(chat, name, bytes, caption, mime, thumb) },
         botName = botName,
-        sendPhoto = { chat, bytes, caption -> tg.sendPhotoFile(chat, bytes, caption, null) },
+        sendPhoto = { chat, bytes, caption -> tg.sendPhoto(chat, bytes, caption, null) },
         notifyAdmins = { text -> Config.adminIds.forEach { id -> runCatching { tg.sendMessage(id, text) } } },
     )
 
@@ -388,35 +388,20 @@ class AutoSender(
                     (r.synopsis?.trim()?.takeIf { it.isNotBlank() }?.let { "\n<i>${h(Ui.cut(it, 650))}</i>" } ?: "")
             running = "sending ${r.name} (${files.size} file(s))"
             var delivered = 0
-            val jpeg = coverRaw?.let { BookBuilder.toJpeg(it, 1200, 4_000_000) ?: it }
             for (chat in targets) {
                 try {
                     val photo = sendPhoto
-                    var cover: TgFile? = null
-                    if (jpeg != null && photo != null) {
-                        cover = runCatching { photo(chat, jpeg, Ui.cut(info, 1020)) }
-                            .onFailure { Logger.debug("cover to $chat failed", it) }.getOrNull()
+                    if (coverRaw != null && photo != null) {
+                        val jpeg = BookBuilder.toJpeg(coverRaw, 1200, 4_000_000) ?: coverRaw
+                        runCatching { photo(chat, jpeg, Ui.cut(info, 1020)) }
+                            .onFailure { Logger.debug("cover to $chat failed", it) }
                     }
-                    val sentFiles = files.mapIndexed { i, (name, bytes) ->
-                        val f = sendDocument(chat, name, bytes, caption(i), format.mime, thumb)
+                    files.forEachIndexed { i, (name, bytes) ->
+                        sendDocument(chat, name, bytes, caption(i), format.mime, thumb)
                         Store.stats.bytesSent += bytes.size
                         delay(1500) // stay below Telegram's per-chat limits
-                        f
                     }
                     delivered++
-                    // remember the novel: users can search it and get it from the channel instantly
-                    if (delivered == 1 && sentFiles.all { it != null && it.messageId > 0 }) {
-                        Library.add(LibNovel(
-                            id = Library.newId(), title = r.name, author = r.author?.trim()?.ifBlank { null },
-                            tags = r.tags.orEmpty().filter { it.isNotBlank() }.take(15), chapters = selected.size,
-                            status = status, source = api.name, url = r.url,
-                            synopsis = r.synopsis?.trim()?.take(1500)?.ifBlank { null },
-                            chatId = chat, coverMessageId = cover?.messageId, coverFileId = cover?.fileId,
-                            messageIds = sentFiles.map { it!!.messageId }, fileIds = sentFiles.mapNotNull { it!!.fileId },
-                            fileNames = files.map { it.first }, format = format.name,
-                        ))
-                        Library.save(force = true)
-                    }
                 } catch (e: CancellationException) {
                     throw e
                 } catch (t: Throwable) {

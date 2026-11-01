@@ -40,7 +40,6 @@ Isliye jab upstream mein nayi sites ya fixes aate hain, to bas ek `git submodule
 14. [Project ka structure](#-project-ka-structure)
 15. [Troubleshooting](#-troubleshooting)
 16. [Terminal commands ki cheat sheet](#-terminal-commands-ki-cheat-sheet)
-17. [📚 Novel Library ("Shazam for novels")](#-novel-library-shazam-for-novels)
 
 ---
 
@@ -73,11 +72,7 @@ Isliye jab upstream mein nayi sites ya fixes aate hain, to bas ek `git submodule
 - ⚙️ Har user ki apni settings: default format, search languages, sites on/off, author notes hatao, cover bhejo
 - 👮 Admin ke liye: `/auto`, `/stats`, `/broadcast`, `/ban`, `/unban`, `/cleancache`, `/testproviders`
 - 🛡 Cloudflare se protected sites ke liye optional **FlareSolverr** support
-- 📚 **Novel Library ("Shazam for novels")**: dump channel mein bheja gaya har novel yaad rehta hai. **Koi bhi user**
-  naam bhejta hai (typo / short form jaise `lotm` bhi chalega) aur **📥 Send Novel** dabate hi poori book channel se
-  turant copy ho jaati hai – dobara scrape / upload nahi, isliye CPU / RAM zero. Inline mode bhi: `@yourbot naam`.
-  Details: [📚 Novel Library](#-novel-library-shazam-for-novels)
-- **Database ki zarurat nahi**: saara data `data/store.json` aur `data/library.json` mein rehta hai
+- **Database ki zarurat nahi**: saara data `data/store.json` mein rehta hai
 
 ---
 
@@ -377,7 +372,6 @@ java -jar build/libs/quicknovel-bot.jar download https://novelfire.net/book/shad
 java -jar build/libs/quicknovel-bot.jar test "the"                   # har site ka search test (results, time, error)
 java -jar build/libs/quicknovel-bot.jar check                        # poora test: search → novel page → 1 chapter, har site ka
 java -jar build/libs/quicknovel-bot.jar auto-test                    # auto sender ek baar chalao (book ./out mein, Telegram nahi)
-java -jar build/libs/quicknovel-bot.jar libsearch lotm               # library (data/library.json) mein fuzzy search test
 ```
 
 `run.sh` ke through bhi chala sakte ho: `./run.sh search "lord of the mysteries"`
@@ -412,10 +406,7 @@ Saare options [`.env.example`](.env.example) mein hain. Pehle environment variab
 | `CACHE_DAYS` | `14` | Itne din se purane cached chapters delete honge (`0` = kabhi nahi) |
 | `SEARCH_TIMEOUT` | `25` | Har site ke liye search timeout (seconds) |
 | `INCLUDE_DISABLED_PROVIDERS` | `false` | QuickNovel app mein disabled sites bhi use karo (zyaadatar band ho chuki hain) |
-| `PUBLIC_LIBRARY` | `true` | `true` = har user library search kar sakta hai aur novel le sakta hai (scraper / websites sirf admin). `false` = library bhi sirf admin |
-| `LIBRARY_CHANNEL_IDS` | – | Extra channels jinki book files library mein add hon (bot wahan admin hona chahiye) |
 | `FLARESOLVERR_URL` | – | jaise `http://localhost:8191/v1`. Cloudflare wali sites ke liye |
-| `FLARESOLVERR_SESSION` | `true` | Ek hi FlareSolverr browser session reuse karo (har request par naya Chrome nahi = kam CPU / RAM) |
 | `TELEGRAM_API_URL` | `https://api.telegram.org` | Apna local Bot API server (2 GB tak upload, phir `MAX_UPLOAD_MB` badhao) |
 | `DATA_DIR` | `data` | Store aur cache ka folder |
 | `LOG_LEVEL` | `info` | `debug` / `info` / `warn` / `error` |
@@ -440,7 +431,7 @@ FLARESOLVERR_URL=http://localhost:8191/v1
 | `/menu` | 🏠 Main menu (har screen par ⬅️ Back / 🏠 Menu buttons bhi hain) |
 | `/search <naam>` (ya `/s`) | Novel search karo. Bina command ke sirf naam bhejne se bhi search hota hai |
 | `/browse` | Kisi site ke popular / latest novels |
-| `/saved` | Aapke saved (⭐) novels |
+| `/library` | Aapke saved (⭐) novels |
 | `/history` | Haal mein khole gaye novels |
 | `/settings` | Format, languages, sites, author notes, cover |
 | `/queue` | Download queue ki position |
@@ -450,8 +441,6 @@ FLARESOLVERR_URL=http://localhost:8191/v1
 | `/help` | Madad |
 
 > 🔒 Default mein bot **private** hai: upar wale saare commands bhi sirf `ADMIN_IDS` use kar sakte hain.
-> Normal users ko sirf **library** milti hai (`PUBLIC_LIBRARY=true`): `/start`, `/new`, `/popular`, `/genres`, `/random`, `/search`, `/help`
-> aur naam bhej ke search. Details: [📚 Novel Library](#-novel-library-shazam-for-novels)
 
 **Admin commands**:
 
@@ -468,8 +457,6 @@ FLARESOLVERR_URL=http://localhost:8191/v1
 | `/ban <id>` / `/unban <id>` | User ko block / unblock karo (sirf `ADMIN_ONLY=false` mein kaam ka) |
 | `/cleancache [days]` | Itne din se purane cached chapters delete karo |
 | `/testproviders [query]` | Saari 9 sites ka search test |
-| `/library` | Library stats: kitne novels, files, kitni baar deliver hue, top novels |
-| `/libremove <naam ya id>` | Novel ko library se hatao (channel ki file delete nahi hoti) |
 
 ---
 
@@ -531,9 +518,7 @@ Agar koi provider JVM par compile nahi hota, to use skip kar do:
 │       │   ├── Downloader.kt   # 3-pass chapter download (parallel → slow retry → mirror site) + disk cache
 │       │   ├── Mirrors.kt      # same novel on other sites dhoondhna + chapter matching
 │       │   ├── BookBuilder.kt  # EPUB3 / TXT / HTML builder, chapter cleaner, cover → JPEG
-│       │   ├── Store.kt        # users, saved novels, history, stats → data/store.json
-│       │   ├── Library.kt      # dump channel library + fuzzy search (typos, short forms) → data/library.json
-│       │   ├── LibraryBot.kt   # library UI: search, new/popular/genres, 📥 Send Novel, inline mode, channel indexing
+│       │   ├── Store.kt        # users, library, history, stats → data/store.json
 │       │   ├── Ui.kt           # novel cards, progress bars, formatting
 │       │   ├── Config.kt       # env / .env reader
 │       │   └── Logger.kt
@@ -541,50 +526,8 @@ Agar koi provider JVM par compile nahi hota, to use skip kar do:
 │       └── …                   # MainActivity, DataStore, CommonActivity shims for upstream code
 ├── src/shim/kotlin/          # shims ki reference copy
 ├── upstream/QuickNovel/      # git submodule → LagradOst/QuickNovel (v3.8.1)
-└── data/                     # (runtime) store.json + library.json + cache/chapters/
+└── data/                     # (runtime) store.json + cache/chapters/
 ```
-
----
-
-## 📚 Novel Library ("Shazam for novels")
-
-Auto scraper jo bhi novel dump channel mein bhejta hai, woh **`data/library.json`** mein save ho jaata hai
-(title, author, tags, chapters, cover aur channel ke message ids). Ab **koi bhi user** (sirf admin nahi) bot ko
-novel ka naam bhejta hai aur poori book turant pa leta hai:
-
-1. User naam bhejta hai – typo, short form, bina space, author ka naam, sab chalta hai:
-
-   | User bhejta hai | Milta hai |
-   |---|---|
-   | `shadow slave` / `shadowslave` / `shadw slav` | Shadow Slave |
-   | `lotm` / `lord mysteries` | Lord of the Mysteries |
-   | `tbate` / `orv` | The Beginning After The End / Omniscient Reader's Viewpoint |
-   | `reverend insanty` | Reverend Insanity |
-   | `cuttlefish` (author) | Lord of the Mysteries |
-
-2. Ek hi pakka match ho to novel card (cover + info) seedha khulta hai, warna ranked list. Kuch na mile to **"Did you mean"**.
-3. **📥 Send Novel** → saari files (saare volumes) dump channel se **copy** hoti hain. Na scrape, na book banana,
-   na upload, isliye **CPU / RAM bilkul nahi** lagta aur file turant aati hai.
-
-**Aur features**
-
-- `/new`, `/popular` (sabse zyada download), `/genres` (tags ke hisaab se), `/random`
-- ↗️ **Share** button: `t.me/yourbot?start=o_<id>` link se seedha novel card khulta hai
-- 🔍 **Inline mode**: @BotFather mein `/setinline` on karo, phir kisi bhi chat mein `@yourbot naam` likho.
-  Ek file wali book seedhe chat mein bhej sakte ho; badi (volumes wali) book ke liye "Get it" button aata hai
-- Flood protection: ek user ek baar mein ek novel, aur do novels ke beech 8 second
-- Admin search karta hai to pehle library dekhi jaati hai; wahan na ho to websites par search (ya **🌐 Search the websites** button)
-
-**Purane novels library mein kaise daalein?**
-
-- Bot ke `/start` hone ke **baad** dump channel mein jo bhi book file (EPUB/TXT/HTML/PDF…) post hoti hai, woh apne aap add hoti hai
-- Jo novels pehle se channel mein hain: unki files channel se **bot ko forward** karo (admin). Bot reply karega
-  `📚 Added to the library` – forward karne se original channel message use hota hai
-- Volumes (`… - Vol 02.epub` ya caption mein `Vol 2/3`) ek hi novel mein jud jaate hain
-- Galat entry: novel card par 🗑 **Remove** ya `/libremove <naam ya id>`
-
-> ⚠️ Bot dump channel mein **admin** hona chahiye (channel posts padhne aur copy karne ke liye).
-> Library ko sirf admin tak rakhna ho to `.env` mein `PUBLIC_LIBRARY=false`.
 
 ---
 

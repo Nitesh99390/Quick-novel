@@ -68,9 +68,6 @@ class Bot(private val tg: TelegramApi) {
     /** Finds and sends new novels by itself (see AutoSender) */
     private val auto = AutoSender(tg) { botUsername }
 
-    /** Everything in the dump channel, searchable by every user ("Shazam for novels") */
-    private val lib = LibraryBot(tg, { botUsername }, ::isAdmin) { chatId, userId, q -> search(chatId, userId, q, null) }
-
     // ------------------------------------------------------------------ main loop
 
     suspend fun run() {
@@ -90,21 +87,10 @@ class Bot(private val tg: TelegramApi) {
         Logger.info("Logged in as @$botUsername — ${Providers.all.size} providers ready")
         tg.setCommands(
             listOf(
-                "start" to "📚 Find a novel",
-                "new" to "🆕 Newest novels",
-                "popular" to "🔥 Most downloaded novels",
-                "genres" to "🏷 Browse by genre",
-                "random" to "🎲 Random novel",
-                "help" to "❓ How to search",
-            )
-        )
-        val adminCommands = listOf(
                 "menu" to "🏠 Main menu",
-                "library" to "📚 Dump channel library stats",
-                "new" to "🆕 Newest novels in the library",
                 "search" to "🔍 Search a novel on all sites",
                 "browse" to "🧭 Browse popular novels of a site",
-                "saved" to "⭐ Your saved novels",
+                "library" to "⭐ Your saved novels",
                 "history" to "🕘 Recently opened novels",
                 "settings" to "⚙️ Format, languages & sources",
                 "queue" to "📥 Your running downloads",
@@ -114,8 +100,8 @@ class Bot(private val tg: TelegramApi) {
                 "skip" to "⏭ Skip the novel being scraped (admin)",
                 "stats" to "📊 Bot stats (admin)",
                 "help" to "❓ How to use the bot",
+            )
         )
-        Config.adminIds.forEach { tg.setCommands(adminCommands, mapOf("type" to "chat", "chat_id" to it)) }
         runCatching { tg.call("deleteWebhook", mapOf("drop_pending_updates" to false)) }
 
         scope.launch { // periodic persistence + cache cleanup
@@ -123,11 +109,10 @@ class Bot(private val tg: TelegramApi) {
             while (isActive) {
                 delay(15_000)
                 Store.save()
-                Library.save()
                 if (++tick % 240 == 0) runCatching { Downloader.cleanCache() }
             }
         }
-        Runtime.getRuntime().addShutdownHook(Thread { Store.save(force = true); Library.save(force = true) })
+        Runtime.getRuntime().addShutdownHook(Thread { Store.save(force = true) })
         scope.launch { auto.loop() } // automatic novel delivery, no permission needed
 
         var offset = 0L
@@ -155,8 +140,6 @@ class Bot(private val tg: TelegramApi) {
             when {
                 u.has("message") -> onMessage(u.path("message"))
                 u.has("callback_query") -> onCallback(u.path("callback_query"))
-                u.has("channel_post") -> onChannelPost(u.path("channel_post"))
-                u.has("inline_query") -> if (publicUser(u.path("inline_query").path("from").path("id").asLong())) lib.inlineQuery(u.path("inline_query"))
             }
         } catch (e: CancellationException) {
             throw e
@@ -177,16 +160,6 @@ class Bot(private val tg: TelegramApi) {
     private fun allowed(id: Long): Boolean =
         isAdmin(id) || (!Config.adminOnly && (Config.allowedUsers.isEmpty() || id in Config.allowedUsers) && Store.users[id]?.banned != true)
 
-    /** Library search / delivery is open to everybody (PUBLIC_LIBRARY=false makes it admin only) */
-    private fun publicUser(id: Long): Boolean = allowed(id) || (Config.publicLibrary && Store.users[id]?.banned != true)
-
-    /** Book files posted in the dump channel (manually / by another bot) are added to the library */
-    private fun onChannelPost(m: JsonNode) {
-        val chatId = m.path("chat").path("id").asLong()
-        if (chatId !in Config.autoChatIds && chatId !in Config.libraryChannels) return
-        lib.indexDocument(m, chatId)
-    }
-
     private fun displayName(from: JsonNode) =
         listOf(from.path("first_name").asText(""), from.path("last_name").asText("")).joinToString(" ").trim().ifEmpty { null }
 
@@ -198,25 +171,12 @@ class Bot(private val tg: TelegramApi) {
         val userId = from.path("id").asLong()
         val text = m.path("text").asText("").trim()
         val msgId = m.path("message_id").asLong()
-        val isPrivate = m.path("chat").path("type").asText() == "private"
-
-        // admin forwards / uploads book files -> they become part of the library
-        if (isAdmin(userId) && m.has("document")) {
-            val n = lib.indexDocument(m, chatId)
-            if (n != null) tg.sendMessage(chatId, "📚 Added to the library: <b>${h(Ui.cut(n.title, 100))}</b>" +
-                    (if (n.chatId == 0L) "\n<i>Tip: forward it from the dump channel so the original message is used.</i>" else "") +
-                    "\nLibrary: ${Library.size} novels", replyTo = msgId)
-            return
-        }
         if (text.isEmpty()) return
 
         if (!allowed(userId)) {
-            if (!publicUser(userId)) {
-                if (isPrivate && text.startsWith("/"))
-                    tg.sendMessage(chatId, "🔒 This is a private bot. Only its admin can use it.\nYour id: <code>$userId</code>")
-                return
-            }
-            publicMessage(chatId, userId, from, text, msgId, isPrivate)
+            // non-admins get one short answer in private chats, nothing in groups; no user data is stored
+            if (m.path("chat").path("type").asText() == "private" && text.startsWith("/"))
+                tg.sendMessage(chatId, "🔒 This is a private bot. Only its admin can use it.\nYour id: <code>$userId</code>")
             return
         }
         val user = Store.user(userId, displayName(from), from.path("username").asText(null))
@@ -243,59 +203,21 @@ class Bot(private val tg: TelegramApi) {
         val url = Regex("https?://\\S+").find(text)?.value?.trimEnd(')', ']', '>', '.', ',')
         if (url != null) { openUrl(chatId, url); return }
         if (m.path("chat").path("type").asText() != "private") return // in groups only commands & links
-        // novels that are already in the dump channel are found instantly; otherwise search the websites
-        if (Library.size > 0 && Library.search(text, 1).isNotEmpty()) lib.search(chatId, userId, text, msgId)
-        else search(chatId, userId, text, msgId)
-    }
-
-    /** Normal users: library only (search, new, popular, genres, 📥 Send Novel, inline) */
-    private suspend fun publicMessage(chatId: Long, userId: Long, from: JsonNode, text: String, msgId: Long, isPrivate: Boolean) {
-        val name = displayName(from)?.substringBefore(' ')
-        if (text.startsWith("/")) {
-            val parts = text.split(Regex("\\s+"), limit = 2)
-            val cmdRaw = parts[0].substring(1)
-            val target = cmdRaw.substringAfter('@', "")
-            if (target.isNotEmpty() && !target.equals(botUsername, true)) return
-            val cmd = cmdRaw.substringBefore('@').lowercase()
-            val arg = parts.getOrNull(1)?.trim().orEmpty()
-            Store.user(userId, displayName(from), from.path("username").asText(null))
-            when {
-                cmd == "start" && arg.startsWith("g_") -> Library.get(arg.removePrefix("g_"))?.let { lib.deliver(chatId, userId, it, null) }
-                    ?: lib.home(chatId, null, name, false)
-                cmd == "start" && arg.startsWith("o_") -> Library.get(arg.removePrefix("o_"))?.let { lib.card(chatId, it, false) }
-                    ?: lib.home(chatId, null, name, false)
-                cmd == "start" || cmd == "menu" || cmd == "home" -> lib.home(chatId, null, name, false)
-                cmd == "help" -> tg.sendMessage(chatId, lib.help(false), keyboard(lib.homeRows(false)))
-                cmd == "id" -> tg.sendMessage(chatId, "Your id: <code>$userId</code>")
-                cmd == "search" || cmd == "s" -> if (arg.isBlank()) tg.sendMessage(chatId, "🔍 Send me the novel name, e.g. <code>Shadow Slave</code>")
-                    else lib.search(chatId, userId, arg, msgId)
-                lib.command(cmd, arg, chatId, userId, name, msgId) -> {}
-                else -> if (isPrivate) lib.home(chatId, null, name, false)
-            }
-            return
-        }
-        if (!isPrivate) return // in groups only commands (and inline mode)
-        Store.user(userId, displayName(from), from.path("username").asText(null))
-        lib.search(chatId, userId, text, msgId)
+        search(chatId, userId, text, msgId)
     }
 
     private suspend fun handleCommand(cmd: String, arg: String, chatId: Long, userId: Long, user: UserData, msgId: Long) {
         when (cmd) {
             "start" -> {
                 if (arg.startsWith("n_")) { Store.resolve(arg.removePrefix("n_"))?.let { openNovel(chatId, arg.removePrefix("n_"), it) }; return }
-                if (arg.startsWith("g_")) { Library.get(arg.removePrefix("g_"))?.let { lib.deliver(chatId, userId, it, null) }; return }
-                if (arg.startsWith("o_")) { Library.get(arg.removePrefix("o_"))?.let { lib.card(chatId, it, true) }; return }
-                if (arg == "lib") { lib.home(chatId, null, user.name?.substringBefore(' '), true); return }
                 welcome(chatId, user)
             }
             "help" -> help(chatId)
             "menu", "home" -> mainMenu(chatId, null)
             "search", "s" -> if (arg.isBlank()) tg.sendMessage(chatId, "🔍 Send me the novel name, e.g.\n<code>/search Shadow Slave</code>\n\nOr just type the name without a command.")
                 else search(chatId, userId, arg, msgId)
-            "browse" -> browseMenu(chatId, null, 0)
-            "new", "latest", "popular", "top", "genres", "genre", "tags", "random", "find", "novel", "library", "lib", "libremove" ->
-                lib.command(cmd, arg, chatId, userId, user.name, msgId)
-            "saved" -> listSaved(chatId, null, user, library = true)
+            "browse", "popular" -> browseMenu(chatId, null, 0)
+            "library", "lib" -> listSaved(chatId, null, user, library = true)
             "history" -> listSaved(chatId, null, user, library = false)
             "settings" -> settings(chatId, null, user)
             "sources", "providers" -> sources(chatId)
@@ -351,8 +273,7 @@ Current format: <b>${BookFormat.of(user.settings.format).label}</b> · change it
     }
 
     private fun menuRows(): List<List<Btn>> = listOf(
-        listOf(Btn("📚 Dump library (${Library.size})", "qh"), Btn("🔍 Inline search", inline = "")),
-        listOf(Btn("🧭 Browse sites", "b:0"), Btn("⚙️ Settings", "st:home")),
+        listOf(Btn("🧭 Browse popular", "b:0"), Btn("⚙️ Settings", "st:home")),
         listOf(Btn("⭐ Library", "ls:L:0"), Btn("🕘 History", "ls:H:0")),
         listOf(Btn("🌐 Supported sites", "src"), Btn("❓ Help", "help")),
     )
@@ -1052,12 +973,6 @@ Current format: <b>${BookFormat.of(user.settings.format).label}</b> · change it
         val isPhoto = msg.has("photo")
         val textMid: Long? = if (isPhoto) null else messageId // photo messages can't become text messages
 
-        if (data.startsWith("q") || data == "noop") {
-            if (!publicUser(userId)) { tg.answerCallback(id, "🔒 Not allowed", true); return }
-            if (data == "noop") { tg.answerCallback(id); return }
-            lib.callback(id, data, chatId, messageId, isPhoto, userId, displayName(from)?.substringBefore(' '))
-            return
-        }
         if (!allowed(userId)) { tg.answerCallback(id, "🔒 Not allowed", true); return }
         val user = Store.user(userId, displayName(from), from.path("username").asText(null))
         val p = data.split(':')

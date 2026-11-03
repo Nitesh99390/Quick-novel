@@ -57,6 +57,21 @@ Isliye jab upstream mein nayi sites ya fixes aate hain, to bas ek `git submodule
   - Bot restart / crash ho jaaye to **wahi novel wahin se continue** hota hai (download hue chapters disk cache se aate hain)
   - Har site ki list mein position yaad rehti hai, isliye har baar shuru ke pages dobara scan nahi hote
   - Details: [🤖 Auto Scraper](#-auto-scraper-247)
+- 📚 **Dump channel library ("Shazam for novels")**: jo bhi novel dump channel mein jaata hai, bot use
+  `data/library.json` mein **yaad rakhta hai**. Koi bhi user (sirf admin nahi) novel ka naam bhejta hai → bot
+  turant result dikhata hai → **📥 Send Novel** button dabao → poora book channel se **turant** aa jaata hai.
+  - Book dobara upload / build **nahi** hota: bot `copyMessage` / Telegram `file_id` use karta hai → **0 CPU, 0 RAM, 0 bandwidth**
+  - **Smart search** (~5 ms, 1000s novels): typo chalega (`shadw slvae`), short form (`lotm`, `tbate`), ulta order
+    (`slave shadow`), bina space (`shadowslave`), aadha naam (`triplet alpha`), "Did you mean…" suggestions
+  - **Filters**: `#romance #system` (genre), `author: TurtleMe`, `>500` / `<100` (chapters) — sab combine ho sakte hain
+  - `/new` · `/popular` · `/genres` · `/random` · **inline mode**: kisi bhi chat mein `@yourbot naam` likho
+    (@BotFather mein `/setinline` on karo)
+  - Channel mein manually daali gayi files bhi apne aap index hoti hain; purane novels ke liye admin
+    channel se files bot ko forward kar de. `PUBLIC_LIBRARY=false` = library bhi sirf admin ke liye
+- 🛡 **FlareSolverr loop fix**: pehle har chapter request par naya FlareSolverr solve hota tha (wahi
+  `FlareSolverr error … chapter-270` spam) jo CPU/RAM khatam karke SSH tak tod deta tha. Ab: ek host ka ek hi
+  solve, fail hone par 2→4→8…30 min back-off, ek hi Chrome tab ek time par, persistent FlareSolverr session,
+  aur cookies kaam na karein to browser ka HTML seedha use hota hai
 - 🔍 **Parallel search**: saari sites par ek saath search, live progress ke saath, aur results smart ranking se sort hote hain
 - 🔗 **Link paste karo**: kisi supported site ka link bhejo, novel seedha khul jayega
 - 🧭 **Browse**: har site ke popular / latest novels dekho (paging ke saath)
@@ -68,7 +83,7 @@ Isliye jab upstream mein nayi sites ya fixes aate hain, to bas ek `git submodule
   - chapters parallel mein fetch hote hain, fail hone par back-off, aur fail hue chapters ke liye ek dheemi doosri koshish
   - disk par ek shared **chapter cache**, isliye dobara download ya update jaldi hota hai
   - badi books apne aap **volumes mein split** ho jaati hain, taaki Telegram ki 50 MB limit mein fit ho sakein
-- ⭐ Har user ki apni **Library** aur 🕘 **History**
+- ⭐ Har user ki apni **Saved list** (`/saved`) aur 🕘 **History**
 - ⚙️ Har user ki apni settings: default format, search languages, sites on/off, author notes hatao, cover bhejo
 - 👮 Admin ke liye: `/auto`, `/stats`, `/broadcast`, `/ban`, `/unban`, `/cleancache`, `/testproviders`
 - 🛡 Cloudflare se protected sites ke liye optional **FlareSolverr** support

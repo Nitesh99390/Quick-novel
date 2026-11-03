@@ -105,4 +105,12 @@ object Config {
 
     /** Max share of chapters that may fail (percent) - worse books are not sent */
     val autoMaxFailedPercent: Int by lazy { int("AUTO_MAX_FAILED_PERCENT", 10).coerceIn(0, 100) }
+
+    // ---------------------------------------------------------------- library (dump channel search)
+
+    /** Everybody can search the dump channel library and get novels from it (default true) */
+    val publicLibrary: Boolean by lazy { bool("PUBLIC_LIBRARY", true) }
+
+    /** Extra channels whose book files are indexed into the library (besides DUMP_CHANNEL_ID) */
+    val libraryChannels: Set<Long> by lazy { ids("LIBRARY_CHANNEL_IDS") }
 }

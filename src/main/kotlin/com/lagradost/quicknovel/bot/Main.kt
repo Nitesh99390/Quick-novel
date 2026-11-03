@@ -28,6 +28,7 @@ Usage:
   quicknovel-bot auto-test               run the auto sender once (book -> ./out, no Telegram)
   quicknovel-bot mainpages              lists the auto scraper uses (popular / latest per site)
   quicknovel-bot mirrors <url>           other sites that have the same novel (used for failed chapters)
+  quicknovel-bot libsearch <query>       search the dump channel library (data/library.json)
         """.trimIndent()
     )
 }
@@ -36,6 +37,15 @@ fun main(args: Array<String>) {
     System.setProperty("java.awt.headless", "true")
     when (args.firstOrNull()?.lowercase()) {
         null, "bot", "run" -> runBot()
+        "libsearch" -> {
+            Library.load()
+            val q = args.drop(1).joinToString(" ")
+            val t = System.nanoTime()
+            val hits = Library.search(q, 20)
+            println("${hits.size} hits in ${(System.nanoTime() - t) / 1_000_000.0} ms (library: ${Library.size})")
+            hits.forEach { println("%6.1f  %s  [%s, %d ch]".format(it.score, it.novel.title, it.novel.author ?: "-", it.novel.chapters)) }
+            if (hits.isEmpty()) Library.suggest(q).forEach { println("  did you mean: ${it.title}") }
+        }
         "providers" -> Providers.all.forEach { println("${it.lang}\t${it.name}\t${it.mainUrl}\t${if (it.hasRateLimit) "rate-limited" else ""}") }
         "search" -> runBlocking {
             val q = args.drop(1).joinToString(" ")
@@ -96,6 +106,7 @@ fun main(args: Array<String>) {
             val auto = AutoSender({ _, name, bytes, caption, _, _ ->
                 out.resolve(name).writeBytes(bytes)
                 println("SENT  ${name} (${Ui.size(bytes.size.toLong())})\n      ${caption.replace(Regex("<[^>]+>"), "").replace("\n", "\n      ")}")
+                null
             }, { "bot" }, targetOverride = setOf(0L))
             auto.load()
             println("already sent: ${auto.count}")
@@ -143,6 +154,7 @@ private fun runBot() {
         exitProcess(1)
     }
     Store.load()
+    Library.load()
     runCatching { Downloader.cleanCache() }
     Logger.info("Data dir: ${Config.dataDir.absolutePath} · providers: ${Providers.all.size} · flaresolverr: ${com.lagradost.quicknovel.network.FlareSolverr.enabled}")
     runBlocking { Bot(TelegramApi(token)).run() }
